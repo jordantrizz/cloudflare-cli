@@ -1,0 +1,373 @@
+#!/bin/bash
+
+declare -A opts
+do_export=0
+NL='
+'
+TA='	'
+
+die() {
+	echo "$1" >&2
+	exit 1
+}
+
+call_cf() {
+	declare -a curl_opts
+	curl_opts=()
+	for oname in "${!opts[@]}"; do
+		curl_opts+=(-d "$oname=${opts[$oname]}")
+	done
+	curl -sS https://www.cloudflare.com/api_json.html "${curl_opts[@]}"
+}
+
+json_decode() {
+	php -r '
+		function pfmt($fmt, &$array, $z=0) {
+			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp)) {
+				$out = pfmt($grp[1], $array, 1) ? pfmt($grp[2], $array) : pfmt($grp[3], $array);
+			}
+			elseif(preg_match("/^!(.*)/", $fmt, $grp)) {
+				$out = implode(",", array_keys(array_filter($array[$grp[1]], function($e){ return $e!=0; })));
+			}
+			elseif(preg_match("/^<(.*)/", $fmt, $grp)) {
+				$code = $grp[1];
+				extract($array, EXTR_SKIP);
+				$out = eval("return $code;");
+			}
+			elseif(preg_match("/^@(.*?)@(.*)/", $fmt, $grp)) {
+				$out = substr($array[$grp[2]], 0, -strlen(".".$array[$grp[1]]));
+				if($out == "") $out = "@";
+			}
+			else {
+				$out = $z ? $array[$fmt] : (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "?");
+			}
+			return $out;
+		}
+		$data = json_decode(file_get_contents("php://stdin"), 1);
+		if('$do_export') file_put_contents("/dev/stderr", var_export($data, 1));
+
+		array_shift($argv);
+		foreach($argv as $param) {
+			if($param=="") continue;
+			if(substr($param, 0, 1)==".") {
+				foreach(explode(".", $param) as $p) if($p!="") $data = $data[$p];
+			}
+			if(substr($param, 0, 1)=="%") {
+				$outfmt = substr($param, 1);
+			}
+			if(substr($param, 0, 1)==",") {
+				foreach($data as $key=>$elem) {
+					$out = array();
+					foreach(explode(",", $param) as $p) if($p!="") {
+						$out[] = pfmt($p, $elem);
+					}
+					if(isset($outfmt)) vprintf($outfmt, $out);
+					else echo implode("\t", $out), "\n";
+				}
+			}
+			if(substr($param, 0, 1)=="&") {
+				foreach(explode("&", $param) as $p) if($p!="") {
+					echo pfmt($p, $data), "\n";
+				}
+			}
+		}
+	' "$@"
+}
+
+findout_z_id() {
+	# reads global variable: record_name
+	# writes global variable: opts[a,z,name,id,...]
+
+	echo -n "Searching ID ... " >&2
+
+	opts[a]=zone_load_multi
+	unset opts[z]
+	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`; do
+		if [[ $record_name =~ ^((.*)\.|)$zone$ ]]; then
+			subdomain=${BASH_REMATCH[2]}
+			opts[z]=$zone
+			break
+		fi
+	done
+	echo -n "${opts[z]} ... " >&2
+	[ -z "${opts[z]}" ] && { echo; return 2; }
+		
+	opts[a]=rec_load_all
+	unset opts[id]
+
+	oldIFS=$IFS
+	IFS=$NL
+	for test_record in `call_cf | json_decode .response.recs.objs ,name,rec_id,type,ttl,content`; do
+		IFS=$oldIFS
+		set -- $test_record
+		if [ "$1" = "$record_name" ]; then
+			opts[name]=$1
+			shift
+			opts[id]=$1
+			shift
+			opts[type]=$1
+			shift
+			opts[ttl]=$1
+			shift
+			opts[content]="$@"
+			break
+		fi
+		IFS=$NL
+	done
+	IFS=$oldIFS
+
+	echo "${opts[id]}" >&2
+	[ -z "${opts[id]}" ] && return 3
+
+	return 0
+}
+
+
+
+
+
+while [ -n "$1" ]; do
+	case "$1" in
+	-E)	shift
+		email=$1;;
+	-T)	shift
+		tkn=$1;;
+	-v)	do_export=1;;
+	--)	shift
+		break;;
+	-*)	false;;
+	*)	break;;
+	esac
+	shift
+done
+
+
+if [ -z "$email" ]; then
+	die "Missing email parameter (-E)."
+fi
+if [ -z "$tkn" ]; then
+	die "Missing token parameter (-T)."
+fi
+
+opts[email]=$email
+opts[tkn]=$tkn
+
+
+if [ -z "$1" ]; then
+	die "Usage: cloudflare [-v] -E <email> -T <api_token> help ..."
+fi
+
+
+
+
+cmd1=$1
+shift
+
+case "$cmd1" in
+list)
+	case "$1" in
+	zone|zones)
+		opts[a]=zone_load_multi
+		call_cf | json_decode .response.zones.objs ,zone_name
+		;;
+	setting|settings)
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
+		opts[a]=zone_settings
+		opts[z]=$1
+		call_cf | json_decode .response.result.objs %"Security Level: %s${NL}Cache Level: %s${NL}Cache TTL: %s${NL}Rocket Loader: %s${NL}Minify: %s${NL}Development Mode: %s${NL}Email Obfuscation: %s${NL}Hotlink Protection: %s${NL}Lazy Load: %s${NL}Auto Resize: %s${NL}Preloader: %s${NL}WAF: %s${NL}" ,sec_lvl,cache_lvl,exp_ttl,async,minify,dev_mode,email_filter,hotlink,lazy,img,preload,waf_profile
+		;;
+	record|records)
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
+		opts[a]=rec_load_all
+		opts[z]=$1
+		call_cf | json_decode .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
+		;;
+	*)
+		die "Possible parameters:
+   zones, settings, records"
+		;;
+	esac
+	;;
+add)
+	case "$1" in
+	record)
+		opts[a]=rec_new
+		shift
+		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [srvname] [protocol] [weight] [port] [target]
+   <type> one of: A CNAME MX TXT SPF AAAA NS SRV LOC
+   let [ttl] 1 to automatic TTL
+   [prio] required only for MX and SRV records
+   parameters behind [prio] required only for SRV record"
+		for prm in z type name content; do
+			opts[$prm]=$1
+			shift
+		done
+		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
+		shift
+		if [ "${opts[type]}" = MX ]; then
+			opts[prio]=$1
+			shift
+		fi
+		if [ "${opts[type]}" = SRV ]; then
+			for prm in prio service srvname protocol weight port target; do
+				opts[$prm]=$1
+				shift
+			done
+		fi
+		call_cf | json_decode "&result&msg"
+		;;
+	*)
+		die "Possible parameters:
+   record"
+	esac
+	;;
+del)
+	cmd2=$1
+	shift
+	case "$cmd2" in
+	record)
+		record_name=$1
+		shift
+		
+		[ -z "$record_name" ] && die "Usage: cloudflare del record <record>"
+
+		findout_z_id
+		case $? in
+		2)	die "No suitable DNS zone found for \`$record_name'";;
+		3)	die "DNS record \`$record_name' not found in zone \`$zone'";;
+		esac
+		
+		opts[a]=rec_delete
+		
+		call_cf | json_decode "&result&msg"
+		;;
+	*)
+		die "Possible parameters:
+   record"
+	esac
+	;;
+change|set)
+	cmd2=$1
+	shift
+	case "$cmd2" in
+	zone)
+		[ -z "$1" ] && die "Usage: cloudflare change zone <zone> [setting] [value]"
+		opts[z]=$1
+		shift
+		
+		case "$1" in
+		security_level|sec_lvl)
+			opts[a]=sec_lvl
+			opts[v]=$2
+			call_cf | json_decode "&result&msg"
+			;;
+		cache_level|cache_lvl)
+			opts[a]=cache_lvl
+			opts[v]=$2
+			call_cf | json_decode "&result&msg"
+			;;
+		rocket_loader|rocket_ldr|async)
+			opts[a]=async
+			opts[v]=$2
+			[ "$2" = off ] && opts[v]=0
+			[ "$2" = auto ] && opts[v]=a
+			[ "$2" = menual ] && opts[v]=m
+			call_cf | json_decode "&result&msg"
+			;;
+		minify)
+			opts[a]=minify
+			opts[v]=$2
+			call_cf | json_decode "&result&msg"
+			;;
+		devmode|dev_mode)
+			opts[a]=devmode
+			opts[v]=$2
+			[ "$2" = on ] && opts[v]=1
+			[ "$2" = off ] && opts[v]=0
+			call_cf | json_decode "&result&msg"
+			;;
+		*)
+			die "Possible parameters:
+   sec_lvl [help | high | med | low | eoff]
+   cache_lvl [agg | basic]
+   rocket_loader [off | auto | manual]
+   minify <bitmask>
+       bit 1 = JS
+       bit 2 = CSS
+       bit 3 = HTML
+   devmode [on | off]"
+			;;
+		esac
+		;;
+	record)
+		[ -z "$1" ] && die "Usage: cloudflare change record <record> [parameter] [value] [parameter] [value] ..."
+		record_name=$1
+		shift
+		if [ -z "$1" ]; then
+			die "Possible parameters:
+   content, ttl, service_mode, (other parameters applied to \`add record')"
+	   	fi
+
+		findout_z_id
+		e=$?
+		case $e in
+		2)	die "No suitable DNS zone found for \`$record_name'";;
+		3)	die "DNS record \`$record_name' not found in zone \`$zone'";;
+		esac
+		
+		while [ -n "$1" ]; do
+			param=$1
+			new=$2
+			[ "$param" != z -a "$param" != id -a -n "$new" ] && opts[$param]=$new
+			shift
+			shift
+		done
+
+		opts[a]=rec_edit
+		
+		call_cf | json_decode "&result&msg"
+		;;
+	*)
+		die "Possible parameters:
+   zone, record"
+	esac
+	;;
+clear)
+	case "$1" in
+	cache)
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare clear cache <zone>"
+		opts[a]=rec_load_all
+		opts[z]=$1
+		opts[v]=1
+		call_cf | json_decode "&result&msg"
+		;;
+	listing|blocking)
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare clear listing <IP>"
+		opts[a]=nul
+		opts[key]=$1
+		call_cf | json_decode "&result&msg"
+		;;
+	*)
+		die "Possible parameters:
+   cache, listing"
+		;;
+	esac
+	;;
+whitelist|blacklist)
+	[ "$cmd1" = whitelist ] && opts[a]=wl || opts[a]=ban
+	[ -z "$1" ] && die "Usage: cloudflare [whitelist | blacklist] <IP>"
+	opts[key]=$1
+	call_cf | json_decode "&result&msg"
+	;;
+*)
+	die "Possible parameters:
+   list, add, del, change, clear, whitelist, blacklist"
+	;;
+esac
+
+
+
