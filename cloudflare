@@ -75,42 +75,61 @@ json_decode() {
 }
 
 findout_z_id() {
-	# reads global variable: record_name
-	# writes global variable: opts[a,z,name,id,...]
+	# arguments:
+	#   $1 - record name (eg: sub.example.com)
+	#   $2 - record type, optional (eg: CNAME)
+	#   $3 - 0/1, stop searching at first match, optional
+	# writes global variable: opts[a,z,name,id,type,...]
+	# return code:
+	#   0 - zone name, record id found and stored in opts[z], opts[id] respectively
+	#   2 - no suitable zone found
+	#   3 - no matching record found
+	#   4 - more than 1 matching record found
 
+	local record_name=$1
+	local record_type=$2
+	local first_match=$3
 	echo -n "Searching ID ... " >&2
 
 	opts[a]=zone_load_multi
 	unset opts[z]
 	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`; do
-		if [[ $record_name =~ ^((.*)\.|)$zone$ ]]; then
+		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
 			subdomain=${BASH_REMATCH[2]}
 			opts[z]=$zone
 			break
 		fi
 	done
 	echo -n "${opts[z]} ... " >&2
-	[ -z "${opts[z]}" ] && { echo; return 2; }
+	[ -z "${opts[z]}" ] && { echo >&2; return 2; }
 		
 	opts[a]=rec_load_all
 	unset opts[id]
 
+	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in `call_cf | json_decode .response.recs.objs ,name,rec_id,type,ttl,content`; do
+	for test_record in `call_cf | json_decode .response.recs.objs ,name,type,rec_id,ttl,content`; do
 		IFS=$oldIFS
 		set -- $test_record
 		if [ "$1" = "$record_name" ]; then
-			opts[name]=$1
-			shift
-			opts[id]=$1
-			shift
-			opts[type]=$1
-			shift
-			opts[ttl]=$1
-			shift
-			opts[content]="$@"
-			break
+			if [ -z "$record_type" -o "$2" = "$record_type" ]; then
+				let rec_found++
+				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
+				opts[name]=$1
+				shift
+				opts[type]=$1
+				shift
+				opts[id]=$1
+				shift
+				opts[ttl]=$1
+				shift
+				opts[content]="$@"
+				if [ "$first_match" = 1 ]; then
+					# accept first matching record
+					break
+				fi
+			fi
 		fi
 		IFS=$NL
 	done
@@ -230,13 +249,27 @@ del)
 	record)
 		record_name=$1
 		shift
+		record_type=
+		first_match=0
 		
-		[ -z "$record_name" ] && die "Usage: cloudflare del record <record>"
+		[ -z "$record_name" ] && die "Usage: cloudflare del record <record> [<type>] [first]"
+		
+		while [ -n "$1" ]; do
+			if [ "$1" = first ]; then
+				first_match=1
+			else
+				record_type=$1
+			fi
+			shift
+		done
 
-		findout_z_id
+		findout_z_id "$record_name" "$record_type" "$first_match"
 		case $? in
+		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	die "DNS record \`$record_name' not found in zone \`$zone'";;
+		3)	die "DNS record \`$record_name' not found";;
+		4)	die "Ambiguous record name: \`$record_name'";;
+		*)	die "Internal error";;
 		esac
 		
 		opts[a]=rec_delete
@@ -302,19 +335,38 @@ change|set)
 		esac
 		;;
 	record)
-		[ -z "$1" ] && die "Usage: cloudflare change record <record> [parameter] [value] [parameter] [value] ..."
+		[ -z "$1" ] && die "Usage: cloudflare change record <record> [type <type>] [first] [<parameter> <value>] [<parameter> <value>] ..."
 		record_name=$1
 		shift
+		record_type=
+		first_match=0
+
+		while [ -n "$1" ]; do
+			if [ "$1" = first ]; then
+				first_match=1
+				shift
+			elif [ "$1" = type ]; then
+				shift
+				record_type=$1
+				shift
+			else
+				break
+			fi
+		done
+
 		if [ -z "$1" ]; then
 			die "Possible parameters:
-   content, ttl, service_mode, (other parameters applied to \`add record')"
+   content, ttl, service_mode, (other parameters that applied to \`add record')"
 	   	fi
 
-		findout_z_id
+		findout_z_id "$record_name" $record_type
 		e=$?
 		case $e in
+		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	die "DNS record \`$record_name' not found in zone \`$zone'";;
+		3)	die "DNS record \`$record_name' not found";;
+		4)	die "Ambiguous record name: \`$record_name', specify \"type\" parameter first!";;
+		*)	die "Internal error";;
 		esac
 		
 		while [ -n "$1" ]; do
