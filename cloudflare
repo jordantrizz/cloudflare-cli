@@ -44,7 +44,7 @@ json_decode() {
 			return $out;
 		}
 		$data = json_decode(file_get_contents("php://stdin"), 1);
-		if('$do_export') file_put_contents("/dev/stderr", var_export($data, 1));
+		if('$do_export') file_put_contents("php://stderr", var_export($data, 1));
 
 		array_shift($argv);
 		foreach($argv as $param) {
@@ -86,14 +86,15 @@ findout_z_id() {
 	#   3 - no matching record found
 	#   4 - more than 1 matching record found
 
-	local record_name=$1
-	local record_type=$2
+	local record_name=${1,,}
+	local record_type=${2^^}
 	local first_match=$3
 	echo -n "Searching ID ... " >&2
 
 	opts[a]=zone_load_multi
 	unset opts[z]
 	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`; do
+		zone=${zone,,}
 		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
 			subdomain=${BASH_REMATCH[2]}
 			opts[z]=$zone
@@ -184,28 +185,32 @@ shift
 
 case "$cmd1" in
 list)
-	case "$1" in
+	cmd2=$1
+	shift
+	case "$cmd2" in
 	zone|zones)
 		opts[a]=zone_load_multi
-		call_cf | json_decode .response.zones.objs ,zone_name
+		call_cf | json_decode .response.zones.objs %"%s$TA%s$TA#%s$NL" ,zone_name,zone_status_class,zone_id
 		;;
 	setting|settings)
-		shift
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
 		opts[a]=zone_settings
-		opts[z]=$1
+		opts[z]=${1,,}
 		call_cf | json_decode .response.result.objs %"Security Level: %s${NL}Cache Level: %s${NL}Cache TTL: %s${NL}Rocket Loader: %s${NL}Minify: %s${NL}Development Mode: %s${NL}Email Obfuscation: %s${NL}Hotlink Protection: %s${NL}Lazy Load: %s${NL}Auto Resize: %s${NL}Preloader: %s${NL}WAF: %s${NL}" ,sec_lvl,cache_lvl,exp_ttl,async,minify,dev_mode,email_filter,hotlink,lazy,img,preload,waf_profile
 		;;
 	record|records)
-		shift
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
 		opts[a]=rec_load_all
-		opts[z]=$1
+		opts[z]=${1,,}
 		call_cf | json_decode .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
+		;;
+	blocking|ban|bans)
+		opts[a]=ipmgmt_load
+		call_cf | json_decode .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
 		;;
 	*)
 		die "Possible parameters:
-   zones, settings, records"
+   zones, settings, records, blocking"
 		;;
 	esac
 	;;
@@ -223,6 +228,7 @@ add)
 			opts[$prm]=$1
 			shift
 		done
+		opts[type]=${opts[type]^^}
 		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
 		shift
 		if [ "${opts[type]}" = MX ]; then
@@ -237,9 +243,16 @@ add)
 		fi
 		call_cf | json_decode "&result&msg"
 		;;
+	whitelist|blacklist)
+		[ "$1" = whitelist ] && opts[a]=wl || opts[a]=ban
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
+		opts[key]=$1
+		call_cf | json_decode "&result&msg"
+		;;
 	*)
 		die "Possible parameters:
-   record"
+   record, whitelist, blacklist"
 	esac
 	;;
 del)
@@ -258,7 +271,7 @@ del)
 			if [ "$1" = first ]; then
 				first_match=1
 			else
-				record_type=$1
+				record_type=${1^^}
 			fi
 			shift
 		done
@@ -306,7 +319,7 @@ change|set)
 			opts[v]=$2
 			[ "$2" = off ] && opts[v]=0
 			[ "$2" = auto ] && opts[v]=a
-			[ "$2" = menual ] && opts[v]=m
+			[ "$2" = manual ] && opts[v]=m
 			call_cf | json_decode "&result&msg"
 			;;
 		minify)
@@ -347,7 +360,7 @@ change|set)
 				shift
 			elif [ "$1" = type ]; then
 				shift
-				record_type=$1
+				record_type=${1^^}
 				shift
 			else
 				break
@@ -359,7 +372,7 @@ change|set)
    content, ttl, service_mode, (other parameters that applied to \`add record')"
 	   	fi
 
-		findout_z_id "$record_name" $record_type
+		findout_z_id "$record_name" "$record_type" "$first_match"
 		e=$?
 		case $e in
 		0)	true;;
@@ -396,28 +409,22 @@ clear)
 		opts[v]=1
 		call_cf | json_decode "&result&msg"
 		;;
-	listing|blocking)
+	listing|blocking|trust|ban)
 		shift
-		[ -z "$1" ] && die "Usage: cloudflare clear listing <IP>"
+		[ -z "$1" ] && die "Usage: cloudflare clear [blocking | trust] <IP>"
 		opts[a]=nul
 		opts[key]=$1
 		call_cf | json_decode "&result&msg"
 		;;
 	*)
 		die "Possible parameters:
-   cache, listing"
+   cache, blocking, trust"
 		;;
 	esac
 	;;
-whitelist|blacklist)
-	[ "$cmd1" = whitelist ] && opts[a]=wl || opts[a]=ban
-	[ -z "$1" ] && die "Usage: cloudflare [whitelist | blacklist] <IP>"
-	opts[key]=$1
-	call_cf | json_decode "&result&msg"
-	;;
 *)
 	die "Possible parameters:
-   list, add, del, change, clear, whitelist, blacklist"
+   list, add, del, change, clear"
 	;;
 esac
 
