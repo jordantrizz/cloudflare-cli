@@ -5,10 +5,20 @@ do_export=0
 NL='
 '
 TA='	'
+usage_text="Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
+Environment variables:
+ CF_ACCOUNT  -  email address (as -E option)
+ CF_TOKEN    -  API token (as -T option)
+Enter \"cloudflare help\" to list available commands."
+
 
 die() {
 	echo "$1" >&2
-	exit 1
+	exit ${2:-1}
+}
+
+is_integer() {
+	expr "$1" : '[0-9]\+$' >/dev/null
 }
 
 call_cf() {
@@ -50,7 +60,9 @@ json_decode() {
 		foreach($argv as $param) {
 			if($param=="") continue;
 			if(substr($param, 0, 1)==".") {
-				foreach(explode(".", $param) as $p) if($p!="") $data = $data[$p];
+				foreach(explode(".", $param) as $p) if($p!="") {
+					if(array_key_exists($p, $data)) $data = $data[$p]; else { $data=array(); break; }
+				}
 			}
 			if(substr($param, 0, 1)=="%") {
 				$outfmt = substr($param, 1);
@@ -79,7 +91,7 @@ findout_z_id() {
 	#   $1 - record name (eg: sub.example.com)
 	#   $2 - record type, optional (eg: CNAME)
 	#   $3 - 0/1, stop searching at first match, optional
-	# writes global variable: opts[a,z,name,id,type,...]
+	# writes global variables: opts[a] opts[z] opts[name] opts[id] opts[type]
 	# return code:
 	#   0 - zone name, record id found and stored in opts[z], opts[id] respectively
 	#   2 - no suitable zone found
@@ -89,7 +101,7 @@ findout_z_id() {
 	local record_name=${1,,}
 	local record_type=${2^^}
 	local first_match=$3
-	echo -n "Searching ID ... " >&2
+	echo -n "Searching zone ... " >&2
 
 	opts[a]=zone_load_multi
 	unset opts[z]
@@ -101,8 +113,8 @@ findout_z_id() {
 			break
 		fi
 	done
-	echo -n "${opts[z]} ... " >&2
 	[ -z "${opts[z]}" ] && { echo >&2; return 2; }
+	echo -n "${opts[z]}, searching ID ... " >&2
 		
 	opts[a]=rec_load_all
 	unset opts[id]
@@ -145,14 +157,16 @@ findout_z_id() {
 
 
 
-
 while [ -n "$1" ]; do
 	case "$1" in
 	-E)	shift
-		email=$1;;
+		CF_ACCOUNT=$1;;
 	-T)	shift
-		tkn=$1;;
+		CF_TOKEN=$1;;
 	-v)	do_export=1;;
+	-h|--help)
+		die "$usage_text" 0
+		;;
 	--)	shift
 		break;;
 	-*)	false;;
@@ -162,19 +176,23 @@ while [ -n "$1" ]; do
 done
 
 
-if [ -z "$email" ]; then
-	die "Missing email parameter (-E)."
+if [ -z "$CF_ACCOUNT" ]; then
+	die "No \$CF_ACCOUNT set.
+
+$usage_text"
 fi
-if [ -z "$tkn" ]; then
-	die "Missing token parameter (-T)."
+if [ -z "$CF_TOKEN" ]; then
+	die "No \$CF_TOKEN set.
+
+$usage_text"
 fi
 
-opts[email]=$email
-opts[tkn]=$tkn
+opts[email]=$CF_ACCOUNT
+opts[tkn]=$CF_TOKEN
 
 
 if [ -z "$1" ]; then
-	die "Usage: cloudflare [-v] -E <email> -T <api_token> help ..."
+	die "$usage_text" 1
 fi
 
 
@@ -209,21 +227,28 @@ list)
 		call_cf | json_decode .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
 		;;
 	*)
-		die "Possible parameters:
+		die "Parameters:
    zones, settings, records, blocking"
 		;;
 	esac
 	;;
+	
 add)
 	case "$1" in
 	record)
 		opts[a]=rec_new
 		shift
-		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [srvname] [protocol] [weight] [port] [target]
-   <type> one of: A CNAME MX TXT SPF AAAA NS SRV LOC
-   let [ttl] 1 to automatic TTL
-   [prio] required only for MX and SRV records
-   parameters behind [prio] required only for SRV record"
+		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
+   <zone>      domain zone to register the record in (see \"cloudflare list zones\")
+   <type>      eg. A AAAA CNAME MX NS SRV TXT SPF LOC (case insensitive)
+   <name>      subdomain name, or \"@\" to refer to the domain's root
+   <content>   usually an IP (A, AAAA), a target domain name (CNAME, MX, SRV), or free text (TXT)
+   [ttl]       Time To Live, 1 = auto
+   [prio]      required only by MX and SRV records, enter \"10\" if unsure
+   [service]   free service name, eg. \"_sip\" (for SRV record type)
+   [protocol]  _tcp, _udp, _tls (SRV)
+   [weight]    relative weight for records with the same priority
+   [port]      layer 4 port number"
 		for prm in z type name content; do
 			opts[$prm]=$1
 			shift
@@ -234,12 +259,15 @@ add)
 		if [ "${opts[type]}" = MX ]; then
 			opts[prio]=$1
 			shift
-		fi
-		if [ "${opts[type]}" = SRV ]; then
-			for prm in prio service srvname protocol weight port target; do
+		elif [ "${opts[type]}" = SRV ]; then
+			for prm in prio service protocol weight port; do
 				opts[$prm]=$1
 				shift
 			done
+			opts[srvname]=${opts[name]}
+			opts[target]=${opts[content]}
+			[ "${opts[service]:0:1}" != _ ] && opts[service]="_${opts[service]}"
+			[ "${opts[protocol]:0:1}" != _ ] && opts[protocol]="_${opts[protocol]}"
 		fi
 		call_cf | json_decode "&result&msg"
 		;;
@@ -251,55 +279,66 @@ add)
 		call_cf | json_decode "&result&msg"
 		;;
 	*)
-		die "Possible parameters:
+		die "Parameters:
    record, whitelist, blacklist"
 	esac
 	;;
-del)
+	
+delete)
 	cmd2=$1
 	shift
 	case "$cmd2" in
 	record)
-		record_name=$1
+		prm1=$1
+		prm2=$2
 		shift
-		record_type=
-		first_match=0
+		shift
 		
-		[ -z "$record_name" ] && die "Usage: cloudflare del record <record> [<type>] [first]"
+		if is_integer "$prm2"; then
+			if [ -n "$1" ]; then
+				die "Unknown parameters: $@"
+			fi
+			opts[id]=$prm2
+			opts[z]=$prm1
 		
-		while [ -n "$1" ]; do
-			if [ "$1" = first ]; then
+		else
+			record_type=
+			first_match=0
+			
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [zone] <record-id>]"
+			
+			if [ "$prm2" = first ]; then
 				first_match=1
 			else
-				record_type=${1^^}
+				record_type=${prm2^^}
 			fi
-			shift
-		done
-
-		findout_z_id "$record_name" "$record_type" "$first_match"
-		case $? in
-		0)	true;;
-		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	die "DNS record \`$record_name' not found";;
-		4)	die "Ambiguous record name: \`$record_name'";;
-		*)	die "Internal error";;
-		esac
+			
+			findout_z_id "$prm1" "$record_type" "$first_match"
+			case $? in
+			0)	true;;
+			2)	die "No suitable DNS zone found for \`$prm1'";;
+			3)	die "DNS record \`$prm1' not found";;
+			4)	die "Ambiguous record spec: \`$prm1'";;
+			*)	die "Internal error";;
+			esac
+			
+		fi
 		
 		opts[a]=rec_delete
-		
 		call_cf | json_decode "&result&msg"
 		;;
 	*)
-		die "Possible parameters:
+		die "Parameters:
    record"
 	esac
 	;;
+	
 change|set)
 	cmd2=$1
 	shift
 	case "$cmd2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare change zone <zone> [setting] [value]"
+		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> [setting] [value]"
 		opts[z]=$1
 		shift
 		
@@ -335,7 +374,7 @@ change|set)
 			call_cf | json_decode "&result&msg"
 			;;
 		*)
-			die "Possible parameters:
+			die "Parameters:
    sec_lvl [help | high | med | low | eoff]
    cache_lvl [agg | basic]
    rocket_loader [off | auto | manual]
@@ -348,7 +387,7 @@ change|set)
 		esac
 		;;
 	record)
-		[ -z "$1" ] && die "Usage: cloudflare change record <record> [type <type>] [first] [<parameter> <value>] [<parameter> <value>] ..."
+		[ -z "$1" ] && die "Usage: cloudflare set record <record> [\"type\" <type>|\"first\"] [<parameter> <value>] [<parameter> <value>] ..."
 		record_name=$1
 		shift
 		record_type=
@@ -368,8 +407,8 @@ change|set)
 		done
 
 		if [ -z "$1" ]; then
-			die "Possible parameters:
-   content, ttl, service_mode, (other parameters that applied to \`add record')"
+			die "Parameters:
+   content, ttl, service_mode (1 = on, 0 = off), other parameters (see \`add record')"
 	   	fi
 
 		findout_z_id "$record_name" "$record_type" "$first_match"
@@ -378,7 +417,7 @@ change|set)
 		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
 		3)	die "DNS record \`$record_name' not found";;
-		4)	die "Ambiguous record name: \`$record_name', specify \"type\" parameter first!";;
+		4)	die "Ambiguous record name: \`$record_name', specify \"type\" parameter!";;
 		*)	die "Internal error";;
 		esac
 		
@@ -395,10 +434,11 @@ change|set)
 		call_cf | json_decode "&result&msg"
 		;;
 	*)
-		die "Possible parameters:
+		die "Parameters:
    zone, record"
 	esac
 	;;
+	
 clear)
 	case "$1" in
 	cache)
@@ -417,16 +457,15 @@ clear)
 		call_cf | json_decode "&result&msg"
 		;;
 	*)
-		die "Possible parameters:
+		die "Parameters:
    cache, blocking, trust"
 		;;
 	esac
 	;;
-*)
-	die "Possible parameters:
-   list, add, del, change, clear"
+	
+*|help)
+	die "Commands:
+   list, add, delete, set, clear"
 	;;
 esac
-
-
 
