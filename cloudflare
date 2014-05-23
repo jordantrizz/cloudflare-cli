@@ -387,7 +387,13 @@ change|set)
 		esac
 		;;
 	record)
-		[ -z "$1" ] && die "Usage: cloudflare set record <record> [\"type\" <type>|\"first\"] [<parameter> <value>] [<parameter> <value>] ..."
+		str1="Usage: cloudflare set record <record> [\"type\" <type> | \"first\"] [<parameter> <value>] [<parameter> <value>] ...
+You must enter record type (A, MX, ...) when there are more records with the same name, or enter \"first\" to modify the first matching record in the zone.
+Parameters:
+  content        Usually IP address, or target for MX and CNAME
+  service_mode   Turn CF proxying on (1) or off (0)
+  for other parameters see 'add record' command."
+		[ -z "$1" ] && die "$str1"
 		record_name=$1
 		shift
 		record_type=
@@ -407,8 +413,7 @@ change|set)
 		done
 
 		if [ -z "$1" ]; then
-			die "Parameters:
-   content, ttl, service_mode (1 = on, 0 = off), other parameters (see \`add record')"
+			die "$str1"
 	   	fi
 
 		findout_z_id "$record_name" "$record_type" "$first_match"
