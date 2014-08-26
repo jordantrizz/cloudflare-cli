@@ -32,23 +32,34 @@ call_cf() {
 
 json_decode() {
 	php -r '
-		function pfmt($fmt, &$array, $z=0) {
-			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp)) {
+		function pfmt($fmt, &$array, $z=0)
+		{
+			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp))
+			{
 				$out = pfmt($grp[1], $array, 1) ? pfmt($grp[2], $array) : pfmt($grp[3], $array);
 			}
-			elseif(preg_match("/^!(.*)/", $fmt, $grp)) {
+			elseif(preg_match("/^!(.*)/", $fmt, $grp))
+			{
 				$out = implode(",", array_keys(array_filter($array[$grp[1]], function($e){ return $e!=0; })));
 			}
-			elseif(preg_match("/^<(.*)/", $fmt, $grp)) {
+			elseif(preg_match("/^<(.*)/", $fmt, $grp))
+			{
 				$code = $grp[1];
 				extract($array, EXTR_SKIP);
 				$out = eval("return $code;");
 			}
-			elseif(preg_match("/^@(.*?)@(.*)/", $fmt, $grp)) {
+			elseif(preg_match("/^@(.*?)@(.*)/", $fmt, $grp))
+			{
 				$out = substr($array[$grp[2]], 0, -strlen(".".$array[$grp[1]]));
 				if($out == "") $out = "@";
 			}
-			else {
+			else
+			{
+				/* Cludflare DNS record notation fix: */
+				if(in_array($array["type"], array("CNAME", "MX")) and substr($array["content"], -1) != ".")
+				{
+					$array["content"] .= ".";
+				}
 				$out = $z ? $array[$fmt] : (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "?");
 			}
 			return $out;
@@ -57,29 +68,64 @@ json_decode() {
 		if('$do_export') file_put_contents("php://stderr", var_export($data, 1));
 
 		array_shift($argv);
-		foreach($argv as $param) {
-			if($param=="") continue;
-			if(substr($param, 0, 1)==".") {
-				foreach(explode(".", $param) as $p) if($p!="") {
-					if(array_key_exists($p, $data)) $data = $data[$p]; else { $data=array(); break; }
+		foreach($argv as $param)
+		{
+			if($param == "")
+			{
+				continue;
+			}
+			if(substr($param, 0, 1) == ".")
+			{
+				foreach(explode(".", $param) as $p)
+				{
+					if($p != "")
+					{
+						if(array_key_exists($p, $data))
+						{
+							$data = $data[$p];
+						}
+						else
+						{
+							$data = array();
+							break;
+						}
+					}
 				}
 			}
-			if(substr($param, 0, 1)=="%") {
+			if(substr($param, 0, 1) == "%")
+			{
 				$outfmt = substr($param, 1);
 			}
-			if(substr($param, 0, 1)==",") {
-				foreach($data as $key=>$elem) {
+			if(substr($param, 0, 1) == ",")
+			{
+				foreach($data as $key=>$elem)
+				{
 					$out = array();
-					foreach(explode(",", $param) as $p) if($p!="") {
-						$out[] = pfmt($p, $elem);
+					foreach(explode(",", $param) as $p)
+					{
+						if($p != "")
+						{
+							$out[] = pfmt($p, $elem);
+						}
 					}
-					if(isset($outfmt)) vprintf($outfmt, $out);
-					else echo implode("\t", $out), "\n";
+					if(isset($outfmt))
+					{
+						vprintf($outfmt, $out);
+					}
+					else
+					{
+						echo implode("\t", $out), "\n";
+					}
 				}
 			}
-			if(substr($param, 0, 1)=="&") {
-				foreach(explode("&", $param) as $p) if($p!="") {
-					echo pfmt($p, $data), "\n";
+			if(substr($param, 0, 1) == "&")
+			{
+				foreach(explode("&", $param) as $p)
+				{
+					if($p!="")
+					{
+						echo pfmt($p, $data), "\n";
+					}
 				}
 			}
 		}
@@ -202,7 +248,7 @@ cmd1=$1
 shift
 
 case "$cmd1" in
-list)
+list|show)
 	cmd2=$1
 	shift
 	case "$cmd2" in
@@ -222,13 +268,13 @@ list)
 		opts[z]=${1,,}
 		call_cf | json_decode .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
 		;;
-	blocking|ban|bans)
+	listing|blocking)
 		opts[a]=ipmgmt_load
 		call_cf | json_decode .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
 		;;
 	*)
 		die "Parameters:
-   zones, settings, records, blocking"
+   zones, settings, records, listing"
 		;;
 	esac
 	;;
@@ -272,7 +318,10 @@ add)
 		call_cf | json_decode "&result&msg"
 		;;
 	whitelist|blacklist)
-		[ "$1" = whitelist ] && opts[a]=wl || opts[a]=ban
+		case "$1" in
+		  whitelist)	opts[a]=wl;;
+		  blacklist)	opts[a]=ban;;
+		esac
 		shift
 		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
 		opts[key]=$1
@@ -327,9 +376,15 @@ delete)
 		opts[a]=rec_delete
 		call_cf | json_decode "&result&msg"
 		;;
+	listing)
+		opts[a]=nul
+		[ -z "$1" ] && die "Usage: cloudflare delete listing <IP>"
+		opts[key]=$1
+		call_cf | json_decode "&result&msg"
+		;;
 	*)
 		die "Parameters:
-   record"
+   record, listing"
 	esac
 	;;
 	
@@ -454,23 +509,16 @@ clear)
 		opts[v]=1
 		call_cf | json_decode "&result&msg"
 		;;
-	listing|blocking|trust|ban)
-		shift
-		[ -z "$1" ] && die "Usage: cloudflare clear [blocking | trust] <IP>"
-		opts[a]=nul
-		opts[key]=$1
-		call_cf | json_decode "&result&msg"
-		;;
 	*)
 		die "Parameters:
-   cache, blocking, trust"
+   cache"
 		;;
 	esac
 	;;
 	
 *|help)
 	die "Commands:
-   list, add, delete, set, clear"
+   show, add, delete, set, clear"
 	;;
 esac
 
