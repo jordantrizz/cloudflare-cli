@@ -56,7 +56,7 @@ json_decode() {
 			else
 			{
 				/* Cludflare DNS record notation fix: */
-				if(in_array($array["type"], array("CNAME", "MX")) and substr($array["content"], -1) != ".")
+				if(isset($array["type"]) and in_array($array["type"], array("CNAME", "MX")) and isset($array["content"]) and substr($array["content"], -1) != ".")
 				{
 					$array["content"] .= ".";
 				}
