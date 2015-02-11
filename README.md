@@ -73,7 +73,9 @@ Parameters:
        bit 2 = CSS
        bit 3 = HTML
    devmode [on | off]
-
+   mirage2 [on | off]
+   ipv6 [on | off]
+         
 $ cloudflare set record
 Usage: cloudflare set record <record> ["type" <type> | "first"] [<parameter> <value>] [<parameter> <value>] ...
 You must enter record type (A, MX, ...) when there are more records with the same name, or enter "first" to modify the first matching record in the zone.
