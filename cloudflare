@@ -12,25 +12,30 @@ Environment variables:
 Enter \"cloudflare help\" to list available commands."
 
 
-die() {
+die()
+{
 	echo "$1" >&2
 	exit ${2:-1}
 }
 
-is_integer() {
+is_integer()
+{
 	expr "$1" : '[0-9]\+$' >/dev/null
 }
 
-call_cf() {
+call_cf()
+{
 	declare -a curl_opts
 	curl_opts=()
-	for oname in "${!opts[@]}"; do
+	for oname in "${!opts[@]}"
+	do
 		curl_opts+=(-d "$oname=${opts[$oname]}")
 	done
 	curl -sS https://www.cloudflare.com/api_json.html "${curl_opts[@]}"
 }
 
-json_decode() {
+json_decode()
+{
 	php -r '
 		function pfmt($fmt, &$array, $z=0)
 		{
@@ -60,10 +65,18 @@ json_decode() {
 				{
 					$array["content"] .= ".";
 				}
-				$out = $z ? $array[$fmt] : (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "?");
+				if(is_array($array[$fmt]))
+				{
+					$out = implode(",", $array[$fmt]);
+				}
+				else
+				{
+					$out = $z ? $array[$fmt] : (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "NA");
+				}
 			}
 			return $out;
 		}
+
 		$data = json_decode(file_get_contents("php://stdin"), 1);
 		if('$do_export') file_put_contents("php://stderr", var_export($data, 1));
 
@@ -96,13 +109,30 @@ json_decode() {
 			{
 				$outfmt = substr($param, 1);
 			}
+			if($param == "table")
+			{
+				ksort($data);
+				$maxlength = 0;
+				foreach($data as $key=>$elem)
+				{
+					if(strlen($key) > $maxlength)
+					{
+						$maxlength = strlen($key);
+					}
+				}
+				foreach($data as $key=>$elem)
+				{
+					printf("%-".$maxlength."s\t%s\n", $key, (string)$elem);
+				}
+			}
 			if(substr($param, 0, 1) == ",")
 			{
 				foreach($data as $key=>$elem)
 				{
 					$out = array();
-					foreach(explode(",", $param) as $p)
+					foreach(preg_split("/(?<!,),(?!,)/", $param) as $p)
 					{
+						$p = str_replace(",,", ",", $p);
 						if($p != "")
 						{
 							$out[] = pfmt($p, $elem);
@@ -132,7 +162,8 @@ json_decode() {
 	' "$@"
 }
 
-findout_z_id() {
+findout_z_id()
+{
 	# arguments:
 	#   $1 - record name (eg: sub.example.com)
 	#   $2 - record type, optional (eg: CNAME)
@@ -151,9 +182,11 @@ findout_z_id() {
 
 	opts[a]=zone_load_multi
 	unset opts[z]
-	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`; do
+	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`
+	do
 		zone=${zone,,}
-		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
+		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]
+		then
 			subdomain=${BASH_REMATCH[2]}
 			opts[z]=$zone
 			break
@@ -168,11 +201,14 @@ findout_z_id() {
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in `call_cf | json_decode .response.recs.objs ,name,type,rec_id,ttl,content`; do
+	for test_record in `call_cf | json_decode .response.recs.objs ,name,type,rec_id,ttl,content`
+	do
 		IFS=$oldIFS
 		set -- $test_record
-		if [ "$1" = "$record_name" ]; then
-			if [ -z "$record_type" -o "$2" = "$record_type" ]; then
+		if [ "$1" = "$record_name" ]
+		then
+			if [ -z "$record_type" -o "$2" = "$record_type" ]
+			then
 				let rec_found++
 				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
 				opts[name]=$1
@@ -184,7 +220,8 @@ findout_z_id() {
 				opts[ttl]=$1
 				shift
 				opts[content]="$@"
-				if [ "$first_match" = 1 ]; then
+				if [ "$first_match" = 1 ]
+				then
 					# accept first matching record
 					break
 				fi
@@ -203,7 +240,8 @@ findout_z_id() {
 
 
 
-while [ -n "$1" ]; do
+while [ -n "$1" ]
+do
 	case "$1" in
 	-E)	shift
 		CF_ACCOUNT=$1;;
@@ -222,12 +260,14 @@ while [ -n "$1" ]; do
 done
 
 
-if [ -z "$CF_ACCOUNT" ]; then
+if [ -z "$CF_ACCOUNT" ]
+then
 	die "No \$CF_ACCOUNT set.
 
 $usage_text"
 fi
-if [ -z "$CF_TOKEN" ]; then
+if [ -z "$CF_TOKEN" ]
+then
 	die "No \$CF_TOKEN set.
 
 $usage_text"
@@ -237,7 +277,8 @@ opts[email]=$CF_ACCOUNT
 opts[tkn]=$CF_TOKEN
 
 
-if [ -z "$1" ]; then
+if [ -z "$1" ]
+then
 	die "$usage_text" 1
 fi
 
@@ -254,13 +295,13 @@ list|show)
 	case "$cmd2" in
 	zone|zones)
 		opts[a]=zone_load_multi
-		call_cf | json_decode .response.zones.objs %"%s$TA%s$TA#%s$NL" ,zone_name,zone_status_class,zone_id
+		call_cf | json_decode .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,zone_name,zone_status_class,zone_id,'<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names))',fqdns
 		;;
 	setting|settings)
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
 		opts[a]=zone_settings
 		opts[z]=${1,,}
-		call_cf | json_decode .response.result.objs %"Security Level: %s${NL}Cache Level: %s${NL}Cache TTL: %s${NL}Rocket Loader: %s${NL}Minify: %s${NL}Development Mode: %s${NL}Email Obfuscation: %s${NL}Hotlink Protection: %s${NL}Lazy Load: %s${NL}Auto Resize: %s${NL}Preloader: %s${NL}WAF: %s${NL}" ,sec_lvl,cache_lvl,exp_ttl,async,minify,dev_mode,email_filter,hotlink,lazy,img,preload,waf_profile
+		call_cf | json_decode .response.result.objs.0 table
 		;;
 	record|records)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
@@ -295,18 +336,22 @@ add)
    [protocol]  _tcp, _udp, _tls (SRV)
    [weight]    relative weight for records with the same priority
    [port]      layer 4 port number"
-		for prm in z type name content; do
+		for prm in z type name content
+		do
 			opts[$prm]=$1
 			shift
 		done
 		opts[type]=${opts[type]^^}
 		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
 		shift
-		if [ "${opts[type]}" = MX ]; then
+		if [ "${opts[type]}" = MX ]
+		then
 			opts[prio]=$1
 			shift
-		elif [ "${opts[type]}" = SRV ]; then
-			for prm in prio service protocol weight port; do
+		elif [ "${opts[type]}" = SRV ]
+		then
+			for prm in prio service protocol weight port
+			do
 				opts[$prm]=$1
 				shift
 			done
@@ -343,8 +388,10 @@ delete)
 		shift
 		shift
 		
-		if is_integer "$prm2"; then
-			if [ -n "$1" ]; then
+		if is_integer "$prm2"
+		then
+			if [ -n "$1" ]
+			then
 				die "Unknown parameters: $@"
 			fi
 			opts[id]=$prm2
@@ -356,7 +403,8 @@ delete)
 			
 			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [zone] <record-id>]"
 			
-			if [ "$prm2" = first ]; then
+			if [ "$prm2" = first ]
+			then
 				first_match=1
 			else
 				record_type=${prm2^^}
@@ -428,6 +476,20 @@ change|set)
 			[ "$2" = off ] && opts[v]=0
 			call_cf | json_decode "&result&msg"
 			;;
+		mirage2)
+			opts[a]=mirage2
+			opts[v]=$2
+			[ "$2" = on ] && opts[v]=1
+			[ "$2" = off ] && opts[v]=0
+			call_cf | json_decode "&result&msg"
+			;;
+		ipv6)
+			opts[a]=ipv46
+			opts[v]=$2
+			[ "$2" = on ] && opts[v]=3
+			[ "$2" = off ] && opts[v]=0
+			call_cf | json_decode "&result&msg"
+			;;
 		*)
 			die "Parameters:
    sec_lvl [help | high | med | low | eoff]
@@ -437,7 +499,9 @@ change|set)
        bit 1 = JS
        bit 2 = CSS
        bit 3 = HTML
-   devmode [on | off]"
+   devmode [on | off]
+   mirage2 [on | off]
+   ipv6 [on | off]"
 			;;
 		esac
 		;;
@@ -454,11 +518,14 @@ Parameters:
 		record_type=
 		first_match=0
 
-		while [ -n "$1" ]; do
-			if [ "$1" = first ]; then
+		while [ -n "$1" ]
+		do
+			if [ "$1" = first ]
+			then
 				first_match=1
 				shift
-			elif [ "$1" = type ]; then
+			elif [ "$1" = type ]
+			then
 				shift
 				record_type=${1^^}
 				shift
@@ -467,7 +534,8 @@ Parameters:
 			fi
 		done
 
-		if [ -z "$1" ]; then
+		if [ -z "$1" ]
+		then
 			die "$str1"
 	   	fi
 
@@ -481,7 +549,8 @@ Parameters:
 		*)	die "Internal error";;
 		esac
 		
-		while [ -n "$1" ]; do
+		while [ -n "$1" ]
+		do
 			param=$1
 			new=$2
 			[ "$param" != z -a "$param" != id -a -n "$new" ] && opts[$param]=$new
