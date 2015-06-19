@@ -360,6 +360,10 @@ add)
 			[ "${opts[service]:0:1}" != _ ] && opts[service]="_${opts[service]}"
 			[ "${opts[protocol]:0:1}" != _ ] && opts[protocol]="_${opts[protocol]}"
 		fi
+		if [ "${opts[type]}" = MX -a -z "${opts[prio]}" ]
+		then
+			opts[prio]=10
+		fi
 		call_cf | json_decode "&result&msg"
 		;;
 	whitelist|blacklist)
