@@ -79,6 +79,11 @@ json_decode()
 
 		$data = json_decode(file_get_contents("php://stdin"), 1);
 		if('$do_export') file_put_contents("php://stderr", var_export($data, 1));
+		if($data["result"] == "error")
+		{
+			echo $data["msg"] . "\n";
+			exit(2);
+		}
 
 		array_shift($argv);
 		foreach($argv as $param)
