@@ -1,10 +1,12 @@
-  DESCRIPTION
+## DESCRIPTION
 
+```
 CLI utility managing CloudFlare services using CloudFlare API
+```
 
+## SYNOPSIS
 
-  SYNOPSIS
-
+```
 $ cloudflare 
 Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
 Environment variables:
@@ -90,4 +92,10 @@ Parameters:
 
 $ cloudflare clear cache
 Usage: cloudflare clear cache <zone>
+```
 
+## REQUIREMENTS
+
+- bash 4.x
+- curl
+- php (php-cli) 5.x
