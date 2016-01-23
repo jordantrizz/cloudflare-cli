@@ -26,12 +26,26 @@ is_integer()
 call_cf()
 {
 	declare -a curl_opts
-	curl_opts=()
-	for oname in "${!opts[@]}"
+	while true
 	do
-		curl_opts+=(-d "$oname=${opts[$oname]}")
+		curl_opts=()
+		for oname in "${!opts[@]}"
+		do
+			curl_opts+=(-d "$oname=${opts[$oname]}")
+		done
+		
+		output=`curl -sS https://www.cloudflare.com/api_json.html "${curl_opts[@]}" | json_decode "$@"`
+		echo "$output"
+		
+		if grep -qE '^!has_more' <<<"$output"
+		then
+			count=`grep -E ^!count= <<<"$output" | cut -f2 -d=`
+			let opts[o]+=$count
+		else
+			unset opts[o]
+			break
+		fi
 	done
-	curl -sS https://www.cloudflare.com/api_json.html "${curl_opts[@]}"
 }
 
 json_decode()
@@ -100,6 +114,11 @@ json_decode()
 					{
 						if(array_key_exists($p, $data))
 						{
+							if($p == "objs" and $data["has_more"])
+							{
+								echo "!has_more\n";
+								echo "!count=", $data["count"], "\n";
+							}
 							$data = $data[$p];
 						}
 						else
@@ -187,7 +206,7 @@ findout_z_id()
 
 	opts[a]=zone_load_multi
 	unset opts[z]
-	for zone in `call_cf | json_decode .response.zones.objs ,zone_name`
+	for zone in `call_cf .response.zones.objs ,zone_name`
 	do
 		zone=${zone,,}
 		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]
@@ -206,7 +225,7 @@ findout_z_id()
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in `call_cf | json_decode .response.recs.objs ,name,type,rec_id,ttl,content`
+	for test_record in `call_cf .response.recs.objs ,name,type,rec_id,ttl,content`
 	do
 		IFS=$oldIFS
 		set -- $test_record
@@ -300,23 +319,23 @@ list|show)
 	case "$cmd2" in
 	zone|zones)
 		opts[a]=zone_load_multi
-		call_cf | json_decode .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,zone_name,zone_status_class,zone_id,'<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names))',fqdns
+		call_cf .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,zone_name,zone_status_class,zone_id,'<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names))',fqdns
 		;;
 	setting|settings)
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
 		opts[a]=zone_settings
 		opts[z]=${1,,}
-		call_cf | json_decode .response.result.objs.0 table
+		call_cf .response.result.objs.0 table
 		;;
 	record|records)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
 		opts[a]=rec_load_all
 		opts[z]=${1,,}
-		call_cf | json_decode .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
+		call_cf .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
 		;;
 	listing|blocking)
 		opts[a]=ipmgmt_load
-		call_cf | json_decode .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
+		call_cf .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
 		;;
 	*)
 		die "Parameters:
@@ -369,7 +388,7 @@ add)
 		then
 			opts[prio]=10
 		fi
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	whitelist|blacklist)
 		case "$1" in
@@ -379,7 +398,7 @@ add)
 		shift
 		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
 		opts[key]=$1
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	*)
 		die "Parameters:
@@ -431,13 +450,13 @@ delete)
 		fi
 		
 		opts[a]=rec_delete
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	listing)
 		opts[a]=nul
 		[ -z "$1" ] && die "Usage: cloudflare delete listing <IP>"
 		opts[key]=$1
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	*)
 		die "Parameters:
@@ -458,12 +477,12 @@ change|set)
 		security_level|sec_lvl)
 			opts[a]=sec_lvl
 			opts[v]=$2
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		cache_level|cache_lvl)
 			opts[a]=cache_lvl
 			opts[v]=$2
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		rocket_loader|rocket_ldr|async)
 			opts[a]=async
@@ -471,33 +490,33 @@ change|set)
 			[ "$2" = off ] && opts[v]=0
 			[ "$2" = auto ] && opts[v]=a
 			[ "$2" = manual ] && opts[v]=m
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		minify)
 			opts[a]=minify
 			opts[v]=$2
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		devmode|dev_mode)
 			opts[a]=devmode
 			opts[v]=$2
 			[ "$2" = on ] && opts[v]=1
 			[ "$2" = off ] && opts[v]=0
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		mirage2)
 			opts[a]=mirage2
 			opts[v]=$2
 			[ "$2" = on ] && opts[v]=1
 			[ "$2" = off ] && opts[v]=0
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		ipv6)
 			opts[a]=ipv46
 			opts[v]=$2
 			[ "$2" = on ] && opts[v]=3
 			[ "$2" = off ] && opts[v]=0
-			call_cf | json_decode "&result&msg"
+			call_cf "&result&msg"
 			;;
 		*)
 			die "Parameters:
@@ -569,7 +588,7 @@ Parameters:
 
 		opts[a]=rec_edit
 		
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	*)
 		die "Parameters:
@@ -585,7 +604,7 @@ clear)
 		opts[a]=rec_load_all
 		opts[z]=$1
 		opts[v]=1
-		call_cf | json_decode "&result&msg"
+		call_cf "&result&msg"
 		;;
 	*)
 		die "Parameters:
