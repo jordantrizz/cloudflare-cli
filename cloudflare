@@ -5,6 +5,7 @@ do_export=0
 NL='
 '
 TA='	'
+API_ENDPOINT=https://www.cloudflare.com/api_json.html
 usage_text="Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
@@ -34,8 +35,8 @@ call_cf()
 			curl_opts+=(-d "$oname=${opts[$oname]}")
 		done
 		
-		output=`curl -sS https://www.cloudflare.com/api_json.html "${curl_opts[@]}" | json_decode "$@"`
-		echo "$output"
+		output=`curl -sS "$API_ENDPOINT" "${curl_opts[@]}" | json_decode "$@"`
+		sed -e '/^!/d' <<<"$output"
 		
 		if grep -qE '^!has_more' <<<"$output"
 		then
