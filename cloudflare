@@ -367,6 +367,7 @@ add)
 			shift
 		done
 		opts[type]=${opts[type]^^}
+		opts[content]=${opts[content]//+/%2B}
 		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
 		shift
 		if [ "${opts[type]}" = MX ]
