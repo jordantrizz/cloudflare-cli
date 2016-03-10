@@ -16,7 +16,7 @@ Enter "cloudflare help" to list available commands.
 
 $ cloudflare help
 Commands:
-   show, add, delete, set, clear
+   show, add, delete, set, clear, check
 
 $ cloudflare show
 Parameters:
@@ -30,7 +30,10 @@ Usage: cloudflare list records <zone>
 
 $ cloudflare add
 Parameters:
-   record, whitelist, blacklist
+   zone, record, whitelist, blacklist
+
+$ cloudflare add zone
+Usage: cloudflare add zone <name>
 
 $ cloudflare add record
 Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
@@ -50,7 +53,10 @@ Usage: cloudflare add [whitelist | blacklist] <IP>
 
 $ cloudflare delete
 Parameters:
-   record, listing
+   zone, record, listing
+
+$ cloudflare delete zone
+Usage: cloudflare delete zone <zone>
 
 $ cloudflare delete record
 Usage: cloudflare delete record [<record-name> [<type>|"first"] | [zone] <record-id>]
@@ -93,6 +99,14 @@ Parameters:
 $ cloudflare clear cache
 Usage: cloudflare clear cache <zone>
 ```
+
+$ cloudflare check
+Parameters:
+   zone
+
+$ cloudflare check zone
+Usage: cloudflare check zone <zone>
+
 
 ## REQUIREMENTS
 

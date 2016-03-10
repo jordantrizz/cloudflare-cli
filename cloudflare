@@ -5,7 +5,8 @@ do_export=0
 NL='
 '
 TA='	'
-API_ENDPOINT=https://www.cloudflare.com/api_json.html
+APIv1_ENDPOINT=https://www.cloudflare.com/api_json.html
+APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 usage_text="Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
@@ -26,6 +27,7 @@ is_integer()
 
 call_cf()
 {
+	local exitcode=0
 	declare -a curl_opts
 	while true
 	do
@@ -35,7 +37,8 @@ call_cf()
 			curl_opts+=(-d "$oname=${opts[$oname]}")
 		done
 		
-		output=`curl -sS "$API_ENDPOINT" "${curl_opts[@]}" | json_decode "$@"`
+		output=`curl -sS "$APIv1_ENDPOINT" "${curl_opts[@]}" | json_decode "$@"`
+		exitcode=$?
 		sed -e '/^!/d' <<<"$output"
 		
 		if grep -qE '^!has_more' <<<"$output"
@@ -47,6 +50,38 @@ call_cf()
 			break
 		fi
 	done
+	return $exitcode
+}
+
+call_cf_v4()
+{
+	local method=$1
+	local formtype=data
+	shift
+	local path=$1
+	shift
+	declare -a curl_opts
+	curl_opts=()
+	if [ "$method" = POST ]
+	then
+		formtype=form
+	else
+		curl_opts+=(-H "Content-Type: application/json" -G)
+	fi
+	while [ -n "$1" ]
+	do
+		if [ ."$1" = .-- ]
+		then
+			shift
+			break
+		else
+			curl_opts+=(--$formtype "$1")
+		fi
+		shift
+	done
+	curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
+		-X "$method" "${curl_opts[@]}" \
+		"$APIv4_ENDPOINT$path" | json_decode "$@"
 }
 
 json_decode()
@@ -67,6 +102,10 @@ json_decode()
 				$code = $grp[1];
 				extract($array, EXTR_SKIP);
 				$out = eval("return $code;");
+			}
+			elseif(preg_match("/^\x22(.*?)\x22/", $fmt, $grp))
+			{
+				$out = $grp[1];
 			}
 			elseif(preg_match("/^@(.*?)@(.*)/", $fmt, $grp))
 			{
@@ -92,15 +131,24 @@ json_decode()
 			return $out;
 		}
 
-		$data = json_decode(file_get_contents("php://stdin"), 1);
-		if('$do_export') file_put_contents("php://stderr", var_export($data, 1));
-		if($data["result"] == "error")
+		$data0 = json_decode(file_get_contents("php://stdin"), 1);
+		if('$do_export') file_put_contents("php://stderr", var_export($data0, 1));
+		if($data0["result"] == "error")
 		{
-			echo $data["msg"] . "\n";
+			echo $data0["msg"] . "\n";
+			exit(2);
+		}
+		if(array_key_exists("success", $data0) and !$data0["success"])
+		{
+			foreach($data0["errors"] as $e)
+			{
+				printf("E%s: %s\n", $e["code"], $e["message"]);
+			}
 			exit(2);
 		}
 
 		array_shift($argv);
+		$data = $data0;
 		foreach($argv as $param)
 		{
 			if($param == "")
@@ -109,6 +157,7 @@ json_decode()
 			}
 			if(substr($param, 0, 1) == ".")
 			{
+				$data = $data0;
 				foreach(explode(".", $param) as $p)
 				{
 					if($p != "")
@@ -262,6 +311,15 @@ findout_z_id()
 	return 0
 }
 
+get_zone_id()
+{
+	zone_id=`call_cf_v4 GET /zones name="$1" -- .result ,id`
+	if [ -z "$zone_id" ]
+	then
+		die "No such DNS zone found"
+	fi
+}
+
 
 
 
@@ -320,7 +378,7 @@ list|show)
 	case "$cmd2" in
 	zone|zones)
 		opts[a]=zone_load_multi
-		call_cf .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,zone_name,zone_status_class,zone_id,'<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names))',fqdns
+		call_cf .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ',zone_name,zone_status_class,zone_id,<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names)),fqdns'
 		;;
 	setting|settings)
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
@@ -332,7 +390,7 @@ list|show)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
 		opts[a]=rec_load_all
 		opts[z]=${1,,}
-		call_cf .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ,@zone_name@name,?auto_ttl?'<"$ttl_ceil(auto)"'?ttl,type,?prio?'<"$prio $content"'?content,'!'props,rec_id
+		call_cf .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ',@zone_name@name,?auto_ttl?<"$ttl_ceil(auto)"?ttl,type,?prio?<"$prio $content"?content,!props,rec_id'
 		;;
 	listing|blocking)
 		opts[a]=ipmgmt_load
@@ -346,10 +404,11 @@ list|show)
 	;;
 	
 add)
-	case "$1" in
+	cmd2=$1
+	shift
+	case "$cmd2" in
 	record)
 		opts[a]=rec_new
-		shift
 		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
    <zone>      domain zone to register the record in (see \"cloudflare list zones\")
    <type>      eg. A AAAA CNAME MX NS SRV TXT SPF LOC (case insensitive)
@@ -393,18 +452,24 @@ add)
 		call_cf "&result&msg"
 		;;
 	whitelist|blacklist)
-		case "$1" in
+		case "$cmd2" in
 		  whitelist)	opts[a]=wl;;
 		  blacklist)	opts[a]=ban;;
 		esac
-		shift
 		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
 		opts[key]=$1
-		call_cf "&result&msg"
+		call_cf "&success"
+		;;
+	zone)
+		if [ $# != 1 ]
+		then
+			die "Usage: cloudflare add zone <name>"
+		fi
+		call_cf_v4 POST /zones name="$1" -- .result '&<"status: $status"'
 		;;
 	*)
 		die "Parameters:
-   record, whitelist, blacklist"
+   zone, record, whitelist, blacklist"
 	esac
 	;;
 	
@@ -460,9 +525,17 @@ delete)
 		opts[key]=$1
 		call_cf "&result&msg"
 		;;
+	zone)
+		if [ $# != 1 ]
+		then
+			die "Usage: cloudflare delete zone <name>"
+		fi
+		get_zone_id "$1"
+		call_cf_v4 DELETE /zones/$zone_id -- '&?success?"success"?"failed"'
+		;;
 	*)
 		die "Parameters:
-   record, listing"
+   zone, record, listing"
 	esac
 	;;
 	
@@ -615,9 +688,28 @@ clear)
 	esac
 	;;
 	
+check)
+	case "$1" in
+	zone)
+		shift
+		[ -z "$1" ] && die "Usage: cloudflare check zone <zone>"
+		get_zone_id "$1"
+		call_cf_v4 PUT /zones/$zone_id/activation_check -- '&?success?"success"?"failed"'
+		;;
+	*)
+		die "Parameters:
+   zone"
+		;;
+	esac
+	;;
+	
+json)
+	json_decode "$@"
+	;;
+	
 *|help)
 	die "Commands:
-   show, add, delete, set, clear"
+   show, add, delete, set, clear, check"
 	;;
 esac
 
