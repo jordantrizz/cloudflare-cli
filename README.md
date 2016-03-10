@@ -98,7 +98,6 @@ Parameters:
 
 $ cloudflare clear cache
 Usage: cloudflare clear cache <zone>
-```
 
 $ cloudflare check
 Parameters:
@@ -106,6 +105,7 @@ Parameters:
 
 $ cloudflare check zone
 Usage: cloudflare check zone <zone>
+```
 
 
 ## REQUIREMENTS
