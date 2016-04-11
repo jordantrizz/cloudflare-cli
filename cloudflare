@@ -87,6 +87,10 @@ call_cf_v4()
 json_decode()
 {
 	php -r '
+		function notzero($e)
+		{
+			return $e!=0;
+		}
 		function pfmt($fmt, &$array, $z=0)
 		{
 			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp))
@@ -95,7 +99,7 @@ json_decode()
 			}
 			elseif(preg_match("/^!(.*)/", $fmt, $grp))
 			{
-				$out = implode(",", array_keys(array_filter($array[$grp[1]], function($e){ return $e!=0; })));
+				$out = implode(",", array_keys(array_filter($array[$grp[1]], "notzero")));
 			}
 			elseif(preg_match("/^<(.*)/", $fmt, $grp))
 			{
@@ -458,7 +462,7 @@ add)
 		esac
 		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
 		opts[key]=$1
-		call_cf "&success"
+		call_cf "&result&msg"
 		;;
 	zone)
 		if [ $# != 1 ]
