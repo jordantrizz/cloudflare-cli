@@ -16,7 +16,7 @@ Enter "cloudflare help" to list available commands.
 
 $ cloudflare help
 Commands:
-   show, add, delete, set, clear, check
+   show, add, delete, set, clear, invalidate, check
 
 $ cloudflare show
 Parameters:
@@ -98,6 +98,9 @@ Parameters:
 
 $ cloudflare clear cache
 Usage: cloudflare clear cache <zone>
+
+$ cloudflare invalidate
+Usage: cloudflare <url-1> [url-2 [url-3 [...]]]
 
 $ cloudflare check
 Parameters:
