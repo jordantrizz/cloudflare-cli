@@ -59,6 +59,7 @@ call_cf()
 
 call_cf_v4()
 {
+	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-STRING]
 	local method path formtype
 	method=${1^^}
 	shift
@@ -111,6 +112,23 @@ json_decode()
 		{
 			return $e!=0;
 		}
+		function repr_array($a, $brackets=false)
+		{
+			if(is_array($a))
+			{
+				$o = array();
+				foreach($a as $k => $v)
+				{
+					$o[] = (is_int($k) ? "" : "$k=") . repr_array($v, true);
+				}
+				if(count($o) > 1 and $brackets)
+					return "[" . implode(",", $o) . "]";
+				else
+					return implode(",", $o);
+			}
+			else
+				return $a;
+		}
 		function pfmt($fmt, &$array, $z=0)
 		{
 			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp))
@@ -145,7 +163,7 @@ json_decode()
 				}
 				if(is_array($array[$fmt]))
 				{
-					$out = implode(",", $array[$fmt]);
+					$out = repr_array($array[$fmt]);
 				}
 				else
 				{
@@ -188,7 +206,7 @@ json_decode()
 					{
 						if(array_key_exists($p, $data))
 						{
-							if($p == "objs" and $data["has_more"])
+							if($p == "objs" and @$data["has_more"])
 							{
 								echo "!has_more\n";
 								echo "!count=", $data["count"], "\n";
@@ -272,12 +290,12 @@ findout_z_id()
 	#   2 - no suitable zone found
 	#   3 - no matching record found
 	#   4 - more than 1 matching record found
-
+	
 	local record_name=${1,,}
 	local record_type=${2^^}
 	local first_match=$3
 	echo -n "Searching zone ... " >&2
-
+	
 	opts[a]=zone_load_multi
 	unset opts[z]
 	for zone in `call_cf .response.zones.objs ,zone_name`
@@ -401,14 +419,17 @@ list|show)
 	shift
 	case "$cmd2" in
 	zone|zones)
-		opts[a]=zone_load_multi
-		call_cf .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ',zone_name,zone_status_class,zone_id,<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names)),fqdns'
+		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
 	setting|settings)
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
-		opts[a]=zone_settings
-		opts[z]=${1,,}
-		call_cf .response.result.objs.0 table
+		if [[ "$1" =~ ^[0-9a-zA-Z]+$ ]]
+		then
+			zone_id=$1
+		else
+			get_zone_id "$1"
+		fi
+		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" ,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
 		;;
 	record|records)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
@@ -774,7 +795,7 @@ json)
 	
 *|help)
 	die "Commands:
-   show, add, delete, set, clear, invalidate check"
+   show, add, delete, set, clear, invalidate, check"
 	;;
 esac
 
