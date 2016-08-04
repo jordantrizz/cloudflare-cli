@@ -1,8 +1,10 @@
 #!/bin/bash
 
+conffile=/etc/cfddnsupdate.conf
+[ -n "$1" ] && conffile=$1
 set -e
 declare -a dyns
-. /etc/cfddnsupdate.conf
+. "$conffile"
 set +e
 
 tstamp=`date +%s`
