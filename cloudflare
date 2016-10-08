@@ -66,7 +66,7 @@ call_cf()
 
 call_cf_v4()
 {
-	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-STRING]
+	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
 	local method path formtype exitcode querystring page per_page
 	method=${1^^}
 	shift
@@ -132,6 +132,36 @@ call_cf_v4()
 
 json_decode()
 {
+	# Parameter Synatx
+	#
+	# .key1.key11.key111
+	#    dive into array
+	# %format
+	#    set output formatting
+	# table
+	#    display as a table
+	# ,mod1,mod2,...
+	#    see modifiers
+	# &mod1&mod2&...
+	#    modifiers per line
+	#
+	#
+	# Modifier Synatx
+	#
+	# ?condition?true?else
+	# !key
+	#    implode non-zero elements of key
+	# !!key1 key2 key3
+	#    implode values of keys if they are not false
+	# <code
+	#    evaluate code, keyN are in $keyN
+	# "string"
+	#    literal
+	# @suffixKey@stringKey
+	#    trim suffix from string
+	# key
+	#    represent the value
+	
 	php -r '
 		function notzero($e)
 		{
@@ -483,9 +513,8 @@ list|show)
 		fi
 		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s$TA; %s #%s$NL" ',@zone_name@name,?<$ttl==1?"auto"?ttl,type,?priority?<"$priority $content"?content,!!proxiable proxied locked,id'
 		;;
-	listing|blocking)
-		opts[a]=ipmgmt_load
-		call_cf .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
+	listing|listings|blocking|blockings)
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',<$configuration["value"],mode,modified_on'
 		;;
 	*)
 		die "Parameters:
