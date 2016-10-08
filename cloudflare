@@ -656,10 +656,19 @@ delete)
 		call_cf "&result&msg"
 		;;
 	listing)
-		opts[a]=nul
-		[ -z "$1" ] && die "Usage: cloudflare delete listing <IP>"
-		opts[key]=$1
-		call_cf "&result&msg"
+		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [\"first\"]"
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',id,<$configuration["value"],notes' |\
+		while read ruleid trg notes
+		do
+			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
+			then
+				call_cf_v4 DELETE /user/firewall/access_rules/rules/$ruleid
+				if [ "$2" = first ]
+				then
+					break
+				fi
+			fi
+		done
 		;;
 	zone)
 		if [ $# != 1 ]
