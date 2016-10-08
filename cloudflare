@@ -93,16 +93,16 @@ call_cf_v4()
 		if [ ."$1" = .-- ]
 		then
 			shift
-			if [ -z "$1" ]
-			then
-				set -- '&?success?"success"?"failed"'
-			fi
 			break
 		else
 			curl_opts+=(--$formtype "$1")
 		fi
 		shift
 	done
+	if [ -z "$1" ]
+	then
+		set -- '&?success?"success"?"failed"'
+	fi
 	
 	page=1
 	per_page=50
@@ -514,7 +514,7 @@ list|show)
 		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s$TA; %s #%s$NL" ',@zone_name@name,?<$ttl==1?"auto"?ttl,type,?priority?<"$priority $content"?content,!!proxiable proxied locked,id'
 		;;
 	listing|listings|blocking|blockings)
-		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',<$configuration["value"],mode,modified_on'
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	*)
 		die "Parameters:
@@ -571,14 +571,30 @@ add)
 		fi
 		call_cf "&result&msg"
 		;;
-	whitelist|blacklist)
+	whitelist|blacklist|challenge)
+		trg=$1
+		trg_type=
+		shift
+		notes=$*
 		case "$cmd2" in
-		  whitelist)	opts[a]=wl;;
-		  blacklist)	opts[a]=ban;;
+		  whitelist)	mode=whitelist;;
+		  blacklist)	mode=block;;
+		  challenge)	mode=challenge;;
 		esac
-		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
-		opts[key]=$1
-		call_cf "&result&msg"
+		
+		if expr "$trg" : '[0-9\.]\+$' >/dev/null
+		then
+			trg_type=ip
+		elif expr "$trg" : '[0-9\.]\+/[0-9]\+$' >/dev/null
+		then
+			trg_type=ip_range
+		elif expr "$trg" : '[A-Z]\+$' >/dev/null
+		then
+			trg_type=country
+		fi
+		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [comment]"
+		
+		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
 	zone)
 		if [ $# != 1 ]
@@ -589,7 +605,7 @@ add)
 		;;
 	*)
 		die "Parameters:
-   zone, record, whitelist, blacklist"
+   zone, record, whitelist, blacklist, challenge"
 	esac
 	;;
 	
