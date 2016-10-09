@@ -8,7 +8,12 @@ CLI utility managing CloudFlare services using CloudFlare API
 
 ```
 $ cloudflare 
-Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
+Usage: cloudflare [Options] <command> <parameters>
+Options:
+ --details, -d    Display detailed info where possible
+ --debug, -D      Display API debugging info
+ -E <email>
+ -T <api_token>
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
@@ -49,7 +54,7 @@ Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [servic
    [port]      layer 4 port number
 
 $ cloudflare add whitelist
-Usage: cloudflare add [whitelist | blacklist] <IP>
+Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]
 
 $ cloudflare delete
 Parameters:
@@ -62,7 +67,7 @@ $ cloudflare delete record
 Usage: cloudflare delete record [<record-name> [<type>|"first"] | [zone] <record-id>]
 
 $ cloudflare delete listing
-Usage: cloudflare delete listing <IP>
+Usage: cloudflare delete listing [<IP | IP/mask | country_code | ID | note_fragment>]
 
 $ cloudflare set
 Parameters:
@@ -100,7 +105,7 @@ $ cloudflare clear cache
 Usage: cloudflare clear cache <zone>
 
 $ cloudflare invalidate
-Usage: cloudflare <url-1> [url-2 [url-3 [...]]]
+Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]
 
 $ cloudflare check
 Parameters:

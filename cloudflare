@@ -85,7 +85,7 @@ call_cf_v4()
 	fi
 	if [ "$method" != POST -a "$method" != DELETE ]
 	then
-		curl_opts+=(-G)
+		curl_opts+=(--get)
 	fi
 
 	while [ -n "$1" ]
@@ -234,7 +234,7 @@ json_decode()
 
 		$data0 = json_decode(file_get_contents("php://stdin"), 1);
 		if('$debug') file_put_contents("php://stderr", var_export($data0, 1));
-		if($data0["result"] == "error")
+		if(@$data0["result"] == "error")
 		{
 			echo $data0["msg"] . "\n";
 			exit(2);
@@ -592,7 +592,7 @@ add)
 		then
 			trg_type=country
 		fi
-		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [comment]"
+		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
 		
 		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
@@ -656,7 +656,7 @@ delete)
 		call_cf "&result&msg"
 		;;
 	listing)
-		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [\"first\"]"
+		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [\"first\"]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',id,<$configuration["value"],notes' |\
 		while read ruleid trg notes
 		do
@@ -821,10 +821,8 @@ clear)
 	cache)
 		shift
 		[ -z "$1" ] && die "Usage: cloudflare clear cache <zone>"
-		opts[a]=rec_load_all
-		opts[z]=$1
-		opts[v]=1
-		call_cf "&result&msg"
+		get_zone_id "$1"
+		call_cf_v4 DELETE /zones/$zone_id/purge_cache '{"purge_everything":true}'
 		;;
 	*)
 		die "Parameters:
@@ -881,7 +879,7 @@ invalidate)
 		done
 		if [ -z "$zone_id" ]
 		then
-			die "Zone name could not figured out."
+			die "Zone name could not be figured out."
 		fi
 		call_cf_v4 DELETE /zones/$zone_id/purge_cache "{\"files\":[$urls]}"
 	else
