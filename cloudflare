@@ -36,6 +36,11 @@ is_integer()
 	expr "$1" : '[0-9]\+$' >/dev/null
 }
 
+is_hex()
+{
+	expr "$1" : '[0-9a-fA-F]\+$' >/dev/null
+}
+
 call_cf()
 {
 	local exitcode=0
@@ -342,15 +347,15 @@ json_decode()
 	' "$@"
 }
 
-findout_z_id()
+findout_record()
 {
 	# arguments:
 	#   $1 - record name (eg: sub.example.com)
 	#   $2 - record type, optional (eg: CNAME)
 	#   $3 - 0/1, stop searching at first match, optional
-	# writes global variables: opts[a] opts[z] opts[name] opts[id] opts[type]
+	# writes global variables: zone, zone_id, record_id, record_type, record_ttl, record_content
 	# return code:
-	#   0 - zone name, record id found and stored in opts[z], opts[id] respectively
+	#   0 - zone and record are found and stored in zone, zone_id, record_id, record_type, record_ttl, record_content
 	#   2 - no suitable zone found
 	#   3 - no matching record found
 	#   4 - more than 1 matching record found
@@ -358,30 +363,31 @@ findout_z_id()
 	local record_name=${1,,}
 	local record_type=${2^^}
 	local first_match=$3
+	local zname_zid
+	local zid
+	local test_record
+	zone_id=
 	echo -n "Searching zone ... " >&2
 	
-	opts[a]=zone_load_multi
-	unset opts[z]
-	for zone in `call_cf .response.zones.objs ,zone_name`
+	for zname_zid in `call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id`
 	do
+		zone=${zname_zid%%:*}
 		zone=${zone,,}
+		zid=${zname_zid##*:}
 		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]
 		then
 			subdomain=${BASH_REMATCH[2]}
-			opts[z]=$zone
+			zone_id=$zid
 			break
 		fi
 	done
-	[ -z "${opts[z]}" ] && { echo >&2; return 2; }
-	echo -n "${opts[z]}, searching ID ... " >&2
-		
-	opts[a]=rec_load_all
-	unset opts[id]
-
+	[ -z "$zone_id" ] && { echo >&2; return 2; }
+	echo -n "$zone, searching record ... " >&2
+	
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in `call_cf .response.recs.objs ,name,type,rec_id,ttl,content`
+	for test_record in `call_cf_v4 GET /zones/$zone_id/dns_records -- .result ,name,type,id,ttl,content`
 	do
 		IFS=$oldIFS
 		set -- $test_record
@@ -391,15 +397,15 @@ findout_z_id()
 			then
 				let rec_found++
 				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
-				opts[name]=$1
+				
 				shift
-				opts[type]=$1
+				record_type=$1
 				shift
-				opts[id]=$1
+				record_id=$1
 				shift
-				opts[ttl]=$1
+				record_ttl=$1
 				shift
-				opts[content]="$@"
+				record_content=$*
 				if [ "$first_match" = 1 ]
 				then
 					# accept first matching record
@@ -410,10 +416,10 @@ findout_z_id()
 		IFS=$NL
 	done
 	IFS=$oldIFS
-
-	echo "${opts[id]}" >&2
-	[ -z "${opts[id]}" ] && return 3
-
+	
+	echo "$record_id" >&2
+	[ -z "$record_id" ] && return 3
+	
 	return 0
 }
 
@@ -571,6 +577,7 @@ add)
 		fi
 		call_cf "&result&msg"
 		;;
+		
 	whitelist|blacklist|challenge)
 		trg=$1
 		trg_type=
@@ -596,6 +603,7 @@ add)
 		
 		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
+		
 	zone)
 		if [ $# != 1 ]
 		then
@@ -603,6 +611,7 @@ add)
 		fi
 		call_cf_v4 POST /zones name="$1" -- .result '&<"status: $status"'
 		;;
+		
 	*)
 		die "Parameters:
    zone, record, whitelist, blacklist, challenge"
@@ -619,14 +628,14 @@ delete)
 		shift
 		shift
 		
-		if is_integer "$prm2"
+		if is_hex "$prm2"
 		then
 			if [ -n "$1" ]
 			then
 				die "Unknown parameters: $@"
 			fi
-			opts[id]=$prm2
-			opts[z]=$prm1
+			record_id=$prm2
+			get_zone_id "$prm1"
 		
 		else
 			record_type=
@@ -641,7 +650,7 @@ delete)
 				record_type=${prm2^^}
 			fi
 			
-			findout_z_id "$prm1" "$record_type" "$first_match"
+			findout_record "$prm1" "$record_type" "$first_match"
 			case $? in
 			0)	true;;
 			2)	die "No suitable DNS zone found for \`$prm1'";;
@@ -652,9 +661,9 @@ delete)
 			
 		fi
 		
-		opts[a]=rec_delete
-		call_cf "&result&msg"
+		call_cf_v4 DELETE /zones/$zone_id/dns_records/$record_id
 		;;
+		
 	listing)
 		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [\"first\"]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',id,<$configuration["value"],notes' |\
@@ -670,6 +679,7 @@ delete)
 			fi
 		done
 		;;
+		
 	zone)
 		if [ $# != 1 ]
 		then
@@ -678,6 +688,7 @@ delete)
 		get_zone_id "$1"
 		call_cf_v4 DELETE /zones/$zone_id
 		;;
+		
 	*)
 		die "Parameters:
    zone, record, listing"
@@ -753,6 +764,7 @@ change|set)
 			;;
 		esac
 		;;
+		
 	record)
 		str1="Usage: cloudflare set record <record> [\"type\" <type> | \"first\"] [<parameter> <value>] [<parameter> <value>] ...
 You must enter record type (A, MX, ...) when there are more records with the same name, or enter \"first\" to modify the first matching record in the zone.
@@ -787,7 +799,7 @@ Parameters:
 			die "$str1"
 	   	fi
 
-		findout_z_id "$record_name" "$record_type" "$first_match"
+		findout_record "$record_name" "$record_type" "$first_match"
 		e=$?
 		case $e in
 		0)	true;;
@@ -810,6 +822,7 @@ Parameters:
 		
 		call_cf "&result&msg"
 		;;
+		
 	*)
 		die "Parameters:
    zone, record"
