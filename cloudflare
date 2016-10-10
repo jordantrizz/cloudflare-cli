@@ -88,7 +88,7 @@ call_cf_v4()
 	then
 		curl_opts+=(-H "Content-Type: application/json")
 	fi
-	if [ "$method" != POST -a "$method" != DELETE ]
+	if [ "$method" = GET -o "$method" = PUT ]
 	then
 		curl_opts+=(--get)
 	fi
@@ -496,7 +496,7 @@ list|show)
 		;;
 	setting|settings)
 		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
-		if [[ "$1" =~ ^[0-9a-zA-Z]+$ ]]
+		if is_hex "$1"
 		then
 			zone_id=$1
 		else
@@ -511,7 +511,7 @@ list|show)
 		;;
 	record|records)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
-		if [[ "$1" =~ ^[0-9a-zA-Z]+$ ]]
+		if is_hex "$1"
 		then
 			zone_id=$1
 		else
@@ -700,69 +700,60 @@ change|set)
 	shift
 	case "$cmd2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> [setting] [value]"
-		opts[z]=$1
+		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
+		[ -z "$2" ] && die "Parameters:
+   security_level [under_attack | high | medium | low | essentially_off]
+   cache_level [aggressive | basic | simplified]
+   rocket_loader [on | off | manual]
+   minify <any variation of css, html, js delimited by comma>
+   development_mode [on | off]
+   mirage [on | off]
+   ipv6 [on | off]
+Other: see 'show zone' command"
+		get_zone_id "$1"
 		shift
+		setting_items=
 		
-		case "$1" in
-		security_level|sec_lvl)
-			opts[a]=sec_lvl
-			opts[v]=$2
-			call_cf "&result&msg"
+		declare -A map
+		map[sec_lvl]=security_level
+		map[cache_lvl]=cache_level
+		map[rocket_ldr]=rocket_loader
+		map[async]=rocket_loader
+		map[devmode]=development_mode
+		map[dev_mode]=development_mode
+		
+		while [ -n "$1" ]
+		do
+			setting=$1
+			shift
+			[ -n "${map[$setting]}" ] && setting=${map[$setting]}
+			setting_value=$1
+			shift
+			
+			case "$setting" in 
+			minify)
+				css=off
+				html=off
+				js=off
+				for s in ${setting_value//,/ }
+				do
+					case "$s" in
+					css|html|js) eval $s=on;;
+					*) die "E.g: cloudflare set zone <zone> minify css,html,js"
+					esac
+				done
+				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
 			;;
-		cache_level|cache_lvl)
-			opts[a]=cache_lvl
-			opts[v]=$2
-			call_cf "&result&msg"
-			;;
-		rocket_loader|rocket_ldr|async)
-			opts[a]=async
-			opts[v]=$2
-			[ "$2" = off ] && opts[v]=0
-			[ "$2" = auto ] && opts[v]=a
-			[ "$2" = manual ] && opts[v]=m
-			call_cf "&result&msg"
-			;;
-		minify)
-			opts[a]=minify
-			opts[v]=$2
-			call_cf "&result&msg"
-			;;
-		devmode|dev_mode)
-			opts[a]=devmode
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=1
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		mirage2)
-			opts[a]=mirage2
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=1
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		ipv6)
-			opts[a]=ipv46
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=3
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		*)
-			die "Parameters:
-   sec_lvl [help | high | med | low | eoff]
-   cache_lvl [agg | basic]
-   rocket_loader [off | auto | manual]
-   minify <bitmask>
-       bit 1 = JS
-       bit 2 = CSS
-       bit 3 = HTML
-   devmode [on | off]
-   mirage2 [on | off]
-   ipv6 [on | off]"
-			;;
-		esac
+			esac
+			
+			if [ "${setting_value:0:1}" != '{' ]
+			then
+				setting_value="\"$setting_value\""
+			fi
+			setting_items="$setting_items${setting_items:+,}{\"id\":\"$setting\",\"value\":$setting_value}"
+		done
+		
+		call_cf_v4 PATCH /zones/$zone_id/settings "{\"items\":[$setting_items]}"
 		;;
 		
 	record)
@@ -771,7 +762,7 @@ You must enter record type (A, MX, ...) when there are more records with the sam
 Parameters:
   content        Usually IP address, or target for MX and CNAME
   service_mode   Turn CF proxying on (1) or off (0)
-  for other parameters see 'add record' command."
+Other: see 'add record' command"
 		[ -z "$1" ] && die "$str1"
 		record_name=$1
 		shift
@@ -793,12 +784,12 @@ Parameters:
 				break
 			fi
 		done
-
+		
 		if [ -z "$1" ]
 		then
 			die "$str1"
 	   	fi
-
+		
 		findout_record "$record_name" "$record_type" "$first_match"
 		e=$?
 		case $e in
