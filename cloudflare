@@ -73,26 +73,26 @@ call_cf_v4()
 {
 	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
 	local method path formtype exitcode querystring page per_page
+	declare -a curl_opts
+	curl_opts=()
+	
 	method=${1^^}
 	shift
 	path=$1
 	shift
-	formtype=data
-	declare -a curl_opts
-	curl_opts=()
-	if [ "$method" = POST ]
-	then
-		formtype=form
-	fi
-	if [ "$method" != POST ]
+	
+	if [ "$method" != POST -o "${1:0:1}" = '{' ]
 	then
 		curl_opts+=(-H "Content-Type: application/json")
+		formtype=data
+	else
+		formtype=form
 	fi
 	if [ "$method" = GET -o "$method" = PUT ]
 	then
 		curl_opts+=(--get)
 	fi
-
+	
 	while [ -n "$1" ]
 	do
 		if [ ."$1" = .-- ]
@@ -153,10 +153,15 @@ json_decode()
 	#
 	# Modifier Synatx
 	#
-	# ?condition?true?else
+	# ?modCondition?modTrue?modFalse
+	#    tenary expression
+	# ||key1||key2||key3||...
+	#    find a true-ish value
+	# key.subkey.subsubkey
+	#    dive into array
 	# !key
 	#    implode non-zero elements of key
-	# !!key1 key2 key3
+	# !!key1 key2 key3 ...
 	#    implode values of keys if they are not false
 	# <code
 	#    evaluate code, keyN are in $keyN
@@ -218,10 +223,30 @@ json_decode()
 				$out = substr($array[$grp[2]], 0, -strlen(".".$array[$grp[1]]));
 				if($out == "") $out = "@";
 			}
+			elseif(preg_match("/^\|\|/", $fmt))
+			{
+				while(preg_match("/^\|\|(.*?)(\|\|.*|$)/", $fmt, $grp))
+				{
+					if(pfmt($grp[1], $array, 0) != false or !preg_match("/^\|\|/", $grp[2]))
+					{
+						$out = pfmt($grp[1], $array, $care_null);
+						break;
+					}
+					$fmt = $grp[2];
+				}
+			}
+			elseif(preg_match("/(.+?)\.(.+)/", $fmt, $grp))
+			{
+				if(is_array(@$array[$grp[1]]))
+					$out = pfmt($grp[2], $array[$grp[1]], $care_null);
+				else
+					$out = NULL;
+			}
 			else
 			{
-				/* Cludflare DNS record notation fix: */
-				if(isset($array["type"]) and in_array($array["type"], array("CNAME", "MX")) and isset($array["content"]) and substr($array["content"], -1) != ".")
+				/* Fix Cludflare´s DNS notation.
+				   We must use FQDN with the trailing dot if no $ORIGIN declared. */
+				if(in_array(@$array["type"], explode(",", "CNAME,MX,NS,SRV")) and isset($array["content"]) and substr($array["content"], -1) != ".")
 				{
 					$array["content"] .= ".";
 				}
@@ -236,8 +261,8 @@ json_decode()
 			}
 			return $out;
 		}
-
-		$data0 = json_decode(file_get_contents("php://stdin"), 1);
+		
+		$data0 = json_decode(file_get_contents("php://stdin"), true);
 		if('$debug') file_put_contents("php://stderr", var_export($data0, 1));
 		if(@$data0["result"] == "error")
 		{
@@ -246,13 +271,15 @@ json_decode()
 		}
 		if(array_key_exists("success", $data0) and !$data0["success"])
 		{
-			foreach($data0["errors"] as $e)
+			function prnt_error($e)
 			{
 				printf("E%s: %s\n", $e["code"], $e["message"]);
+				foreach((array)@$e["error_chain"] as $e) prnt_error($e);
 			}
+			foreach($data0["errors"] as $e) prnt_error($e);
 			exit(2);
 		}
-
+		
 		if(isset($data0["result_info"]["page"]) and $data0["result_info"]["page"] < $data0["result_info"]["total_pages"])
 		{
 			echo "!has_more\n";
@@ -504,10 +531,11 @@ list|show)
 		fi
 		if [ "$details" = 1 ]
 		then
-			call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" ,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
+			fieldspec=,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
 		else
-			call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$NL" ,id,value
+			fieldspec=,id,value,\"\",\"\"
 		fi
+		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 	record|records)
 		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
@@ -517,7 +545,8 @@ list|show)
 		else
 			get_zone_id "$1"
 		fi
-		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s$TA; %s #%s$NL" ',@zone_name@name,?<$ttl==1?"auto"?ttl,type,?priority?<"$priority $content"?content,!!proxiable proxied locked,id'
+		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
+			',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		;;
 	listing|listings|blocking|blockings)
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
@@ -534,48 +563,93 @@ add)
 	shift
 	case "$cmd2" in
 	record)
-		opts[a]=rec_new
 		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
-   <zone>      domain zone to register the record in (see \"cloudflare list zones\")
-   <type>      eg. A AAAA CNAME MX NS SRV TXT SPF LOC (case insensitive)
+   <zone>      domain zone to register the record in, see 'list zones' command
+   <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT, SPF, LOC
    <name>      subdomain name, or \"@\" to refer to the domain's root
-   <content>   usually an IP (A, AAAA), a target domain name (CNAME, MX, SRV), or free text (TXT)
+   <content>   IP address for A, AAAA
+               FQDN for CNAME, MX, NS, SRV
+               any text for TXT, spf definition text for SPF
+               coordinates for LOC (see RFC 1876 section 3)
    [ttl]       Time To Live, 1 = auto
    [prio]      required only by MX and SRV records, enter \"10\" if unsure
-   [service]   free service name, eg. \"_sip\" (for SRV record type)
-   [protocol]  _tcp, _udp, _tls (SRV)
+   These ones are only for SRV records:
+   [service]   service name, eg. \"sip\"
+   [protocol]  tcp, udp, tls
    [weight]    relative weight for records with the same priority
-   [port]      layer 4 port number"
-		for prm in z type name content
-		do
-			opts[$prm]=$1
-			shift
-		done
-		opts[type]=${opts[type]^^}
-		opts[content]=${opts[content]//+/%2B}
-		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
+   [port]      layer-4 port number"
+		
+		zone=$1
 		shift
-		if [ "${opts[type]}" = MX ]
-		then
-			opts[prio]=$1
-			shift
-		elif [ "${opts[type]}" = SRV ]
-		then
-			for prm in prio service protocol weight port
+		type=${1^^}
+		shift 
+		name=$1
+		shift
+		
+		content=$1
+		ttl=$2
+		prio=$3
+		service=$4
+		protocol=$5
+		weight=$6
+		port=$7
+		
+		[ -n "$ttl" ] || ttl=1
+		[ -n "$prio" ] || prio=10
+		get_zone_id "$zone"
+		
+		
+		case "$type" in
+		MX)
+			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl" priority="$prio"
+			;;
+		LOC)
+			locdata=
+			data_separated=1
+			if [ -n "${content//[! ]/}" ]
+			then
+				data_separated=0
+				set -- $content
+			fi
+			for key in lat_degrees lat_minutes lat_seconds lat_direction \
+			  long_degrees long_minutes long_seconds long_direction \
+			  altitude size precision_horz precision_vert
 			do
-				opts[$prm]=$1
+				value=$1
+				value=${value%m}
+				locdata="$locdata${locdata:+,}\"$key\":\"$value\""
 				shift
 			done
-			opts[srvname]=${opts[name]}
-			opts[target]=${opts[content]}
-			[ "${opts[service]:0:1}" != _ ] && opts[service]="_${opts[service]}"
-			[ "${opts[protocol]:0:1}" != _ ] && opts[protocol]="_${opts[protocol]}"
-		fi
-		if [ "${opts[type]}" = MX -a -z "${opts[prio]}" ]
-		then
-			opts[prio]=10
-		fi
-		call_cf "&result&msg"
+			if [ $data_separated = 1 ]
+			then
+				ttl=${1:-1}
+			fi
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}"
+			;;
+		SRV)
+			[ "${service:0:1}" = _ ] || service="_$service"
+			[ "${protocol:0:1}" = _ ] || protocol="_$protocol"
+			[ -n "$weight" ] || weight=1
+			target=$content
+			
+			call_cf_v4 POST /zones/$zone_id/dns_records "{
+				\"type\":\"$type\",
+				\"ttl\":$ttl,
+				\"data\":{
+					\"service\":\"$service\",
+					\"proto\":\"$protocol\",
+					\"name\":\"$name\",
+					\"priority\":$prio,
+					\"weight\":$weight,
+					\"port\":$port,
+					\"target\":\"$target\"
+					}
+				}"
+			;;
+		*)
+			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl"
+			;;
+		esac
 		;;
 		
 	whitelist|blacklist|challenge)
@@ -666,7 +740,7 @@ delete)
 		
 	listing)
 		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [\"first\"]"
-		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ',id,<$configuration["value"],notes' |\
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
 		while read ruleid trg notes
 		do
 			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
@@ -701,7 +775,7 @@ change|set)
 	case "$cmd2" in
 	zone)
 		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
-		[ -z "$2" ] && die "Parameters:
+		[ -z "$2" ] && die "Settings:
    security_level [under_attack | high | medium | low | essentially_off]
    cache_level [aggressive | basic | simplified]
    rocket_loader [on | off | manual]
