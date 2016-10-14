@@ -88,7 +88,7 @@ call_cf_v4()
 	else
 		formtype=form
 	fi
-	if [ "$method" = GET -o "$method" = PUT ]
+	if [ "$method" = GET ]
 	then
 		curl_opts+=(--get)
 	fi
@@ -388,7 +388,7 @@ findout_record()
 	#   4 - more than 1 matching record found
 	
 	local record_name=${1,,}
-	local record_type=${2^^}
+	record_type=${2^^}
 	local first_match=$3
 	local zname_zid
 	local zid
@@ -715,7 +715,7 @@ delete)
 			record_type=
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [zone] <record-id>]"
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<name> [<type> | \"first\"] | <zone> <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -732,7 +732,6 @@ delete)
 			4)	die "Ambiguous record spec: \`$prm1'";;
 			*)	die "Internal error";;
 			esac
-			
 		fi
 		
 		call_cf_v4 DELETE /zones/$zone_id/dns_records/$record_id
@@ -783,7 +782,7 @@ change|set)
    development_mode [on | off]
    mirage [on | off]
    ipv6 [on | off]
-Other: see 'show zone' command"
+Other: see output of 'show zone' command"
 		get_zone_id "$1"
 		shift
 		setting_items=
@@ -831,32 +830,28 @@ Other: see 'show zone' command"
 		;;
 		
 	record)
-		str1="Usage: cloudflare set record <record> [\"type\" <type> | \"first\"] [<parameter> <value>] [<parameter> <value>] ...
-You must enter record type (A, MX, ...) when there are more records with the same name, or enter \"first\" to modify the first matching record in the zone.
-Parameters:
-  content        Usually IP address, or target for MX and CNAME
-  service_mode   Turn CF proxying on (1) or off (0)
-Other: see 'add record' command"
+		str1="Usage: cloudflare set record <name> [\"type\" <type> | \"first\"] <setting> <value> [<setting> <value> [ ... ]]
+You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
+Settings:
+  name           Rename the record
+  [new]type      Change type
+  content        See description in 'add record' command
+  ttl            See description in 'add record' command
+  proxied        Turn CF proxying on/off"
 		[ -z "$1" ] && die "$str1"
 		record_name=$1
 		shift
 		record_type=
 		first_match=0
-
+		
 		while [ -n "$1" ]
 		do
-			if [ "$1" = first ]
-			then
-				first_match=1
-				shift
-			elif [ "$1" = type ]
-			then
-				shift
-				record_type=${1^^}
-				shift
-			else
-				break
-			fi
+			case "$1" in
+			first)	first_match=1;;
+			type)	shift; record_type=${1^^};;
+			*)		break;;
+			esac
+			shift
 		done
 		
 		if [ -z "$1" ]
@@ -870,22 +865,40 @@ Other: see 'add record' command"
 		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
 		3)	die "DNS record \`$record_name' not found";;
-		4)	die "Ambiguous record name: \`$record_name', specify \"type\" parameter!";;
+		4)	die "Ambiguous record name: \`$record_name'";;
 		*)	die "Internal error";;
 		esac
 		
+		record_content_esc=${record_content//\"/\\\"}
+		old_data="\"name\":\"$record_name\",\"type\":\"$record_type\",\"ttl\":$record_ttl,\"content\":\"$record_content_esc\""
+		new_data=
 		while [ -n "$1" ]
 		do
-			param=$1
-			new=$2
-			[ "$param" != z -a "$param" != id -a -n "$new" ] && opts[$param]=$new
+			setting=$1
 			shift
+			value=$1
 			shift
+			
+			[ "$setting" = service_mode ] && setting=proxied
+			[ "$setting" = newtype -o "$setting" = new_type ] && setting=type
+			if [ "$setting" = proxied ]
+			then
+				value=${value,,}
+				[ "$value" = on -o "$value" = 1 ] && value=true
+				[ "$value" = off -o "$value" = 0 ] && value=false
+			fi
+			[ "$setting" = type ] && value=${value^^}
+			
+			if expr "$value" : '[0-9\.]\+$' >/dev/null || [ "$value" = true -o "$value" = false ]
+			then
+				value_escq=$value
+			else
+				value_escq=\"${value//\"/\\\"}\"
+			fi
+			new_data="$new_data${new_data:+,}\"$setting\":$value_escq"
 		done
-
-		opts[a]=rec_edit
 		
-		call_cf "&result&msg"
+		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}"
 		;;
 		
 	*)
