@@ -652,14 +652,14 @@ add)
 		esac
 		;;
 		
-	whitelist|blacklist|challenge)
+	whitelist|blacklist|block|challenge)
 		trg=$1
 		trg_type=
 		shift
 		notes=$*
 		case "$cmd2" in
 		  whitelist)	mode=whitelist;;
-		  blacklist)	mode=block;;
+		  blacklist|block)	mode=block;;
 		  challenge)	mode=challenge;;
 		esac
 		

@@ -1,8 +1,7 @@
 ## DESCRIPTION
 
-```
-CLI utility managing CloudFlare services using CloudFlare API
-```
+CLI utility managing CloudFlare services - highly focused on DNS - 
+using CloudFlare API
 
 
 ## SYNOPSIS
