@@ -1,12 +1,19 @@
 #!/bin/bash
 
 declare -A opts
-verbose=0
+debug=0
+details=0
 NL=$'\n'
 TA=$'\t'
 APIv1_ENDPOINT=https://www.cloudflare.com/api_json.html
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
-usage_text="Usage: cloudflare [-v] [-E <email>] [-T <api_token>] <command> <parameters>
+usage_text=\
+"Usage: cloudflare [Options] <command> <parameters>
+Options:
+ --details, -d    Display detailed info where possible
+ --debug, -D      Display API debugging info
+ -E <email>
+ -T <api_token>
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
@@ -19,14 +26,19 @@ die()
 	exit ${2:-1}
 }
 
-is_verbose()
+is_debug()
 {
-	[ "$verbose" = 1 ]
+	[ "$debug" = 1 ]
 }
 
 is_integer()
 {
 	expr "$1" : '[0-9]\+$' >/dev/null
+}
+
+is_hex()
+{
+	expr "$1" : '[0-9a-fA-F]\+$' >/dev/null
 }
 
 call_cf()
@@ -59,63 +71,138 @@ call_cf()
 
 call_cf_v4()
 {
-	local method path formtype
+	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+	local method path formtype exitcode querystring page per_page
+	declare -a curl_opts
+	curl_opts=()
+	
 	method=${1^^}
 	shift
 	path=$1
 	shift
-	formtype=data
-	declare -a curl_opts
-	curl_opts=()
-	if [ "$method" = POST ]
-	then
-		formtype=form
-	fi
-	if [ "$method" != POST ]
+	
+	if [ "$method" != POST -o "${1:0:1}" = '{' ]
 	then
 		curl_opts+=(-H "Content-Type: application/json")
+		formtype=data
+	else
+		formtype=form
 	fi
-	if [ "$method" != POST -a "$method" != DELETE ]
+	if [ "$method" = GET ]
 	then
-		curl_opts+=(-G)
+		curl_opts+=(--get)
 	fi
-
+	
 	while [ -n "$1" ]
 	do
 		if [ ."$1" = .-- ]
 		then
 			shift
-			if [ -z "$1" ]
-			then
-				set -- '&?success?"success"?"failed"'
-			fi
 			break
 		else
 			curl_opts+=(--$formtype "$1")
 		fi
 		shift
 	done
-	if is_verbose
+	if [ -z "$1" ]
 	then
-		echo "<<< curl -X $method ${curl_opts[*]} $APIv4_ENDPOINT$path" >&2
+		set -- '&?success?"success"?"failed"'
 	fi
-	curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
-		-X "$method" "${curl_opts[@]}" \
-		"$APIv4_ENDPOINT$path" | json_decode "$@"
+	
+	page=1
+	per_page=50
+	while true
+	do
+		querystring="?page=$page&per_page=$per_page"
+		if is_debug
+		then
+			echo "<<< curl -X $method ${curl_opts[*]} $APIv4_ENDPOINT$path$querystring" >&2
+		fi
+		
+		output=`curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
+			-X "$method" "${curl_opts[@]}" \
+			"$APIv4_ENDPOINT$path$querystring" | json_decode "$@"`
+		exitcode=$?
+		sed -e '/^!/d' <<<"$output"
+		
+		if grep -qE '^!has_more' <<<"$output"
+		then
+			let page++
+		else
+			break
+		fi
+	done
+	return $exitcode
 }
 
 json_decode()
 {
+	# Parameter Synatx
+	#
+	# .key1.key11.key111
+	#    dive into array
+	# %format
+	#    set output formatting
+	# table
+	#    display as a table
+	# ,mod1,mod2,...
+	#    see modifiers
+	# &mod1&mod2&...
+	#    modifiers per line
+	#
+	#
+	# Modifier Synatx
+	#
+	# ?modCondition?modTrue?modFalse
+	#    tenary expression
+	# ||key1||key2||key3||...
+	#    find a true-ish value
+	# key.subkey.subsubkey
+	#    dive into array
+	# !key
+	#    implode non-zero elements of key
+	# !!key1 key2 key3 ...
+	#    implode values of keys if they are not false
+	# <code
+	#    evaluate code, keyN are in $keyN
+	# "string"
+	#    literal
+	# @suffixKey@stringKey
+	#    trim suffix from string
+	# key
+	#    represent the value
+	
 	php -r '
 		function notzero($e)
 		{
 			return $e!=0;
 		}
-		function pfmt($fmt, &$array, $z=0)
+		function repr_array($a, $brackets=false)
+		{
+			if(is_array($a))
+			{
+				$o = array();
+				foreach($a as $k => $v)
+				{
+					$o[] = (is_int($k) ? "" : "$k=") . repr_array($v, true);
+				}
+				if(count($o) > 1 and $brackets)
+					return "[" . implode(",", $o) . "]";
+				else
+					return implode(",", $o);
+			}
+			else
+				return $a;
+		}
+		function pfmt($fmt, &$array, $care_null=1)
 		{
 			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp))
 			{
-				$out = pfmt($grp[1], $array, 1) ? pfmt($grp[2], $array) : pfmt($grp[3], $array);
+				$out = pfmt($grp[1], $array, 0) ? pfmt($grp[2], $array) : pfmt($grp[3], $array);
+			}
+			elseif(preg_match("/^!!(.*)/", $fmt, $grp))
+			{
+				$out = implode(",", array_filter(preg_split("/\s+/", $grp[1]), function($k) use($array){ return !!$array[$k]; }));
 			}
 			elseif(preg_match("/^!(.*)/", $fmt, $grp))
 			{
@@ -136,41 +223,68 @@ json_decode()
 				$out = substr($array[$grp[2]], 0, -strlen(".".$array[$grp[1]]));
 				if($out == "") $out = "@";
 			}
+			elseif(preg_match("/^\|\|/", $fmt))
+			{
+				while(preg_match("/^\|\|(.*?)(\|\|.*|$)/", $fmt, $grp))
+				{
+					if(pfmt($grp[1], $array, 0) != false or !preg_match("/^\|\|/", $grp[2]))
+					{
+						$out = pfmt($grp[1], $array, $care_null);
+						break;
+					}
+					$fmt = $grp[2];
+				}
+			}
+			elseif(preg_match("/(.+?)\.(.+)/", $fmt, $grp))
+			{
+				if(is_array(@$array[$grp[1]]))
+					$out = pfmt($grp[2], $array[$grp[1]], $care_null);
+				else
+					$out = NULL;
+			}
 			else
 			{
-				/* Cludflare DNS record notation fix: */
-				if(isset($array["type"]) and in_array($array["type"], array("CNAME", "MX")) and isset($array["content"]) and substr($array["content"], -1) != ".")
+				/* Fix Cludflare´s DNS notation.
+				   We must use FQDN with the trailing dot if no $ORIGIN declared. */
+				if(in_array(@$array["type"], explode(",", "CNAME,MX,NS,SRV")) and isset($array["content"]) and substr($array["content"], -1) != ".")
 				{
 					$array["content"] .= ".";
 				}
-				if(is_array($array[$fmt]))
+				if(is_array(@$array[$fmt]))
 				{
-					$out = implode(",", $array[$fmt]);
+					$out = repr_array($array[$fmt]);
 				}
 				else
 				{
-					$out = $z ? $array[$fmt] : (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "NA");
+					$out = $care_null ? (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "NA") : @$array[$fmt];
 				}
 			}
 			return $out;
 		}
-
-		$data0 = json_decode(file_get_contents("php://stdin"), 1);
-		if('$verbose') file_put_contents("php://stderr", var_export($data0, 1));
-		if($data0["result"] == "error")
+		
+		$data0 = json_decode(file_get_contents("php://stdin"), true);
+		if('$debug') file_put_contents("php://stderr", var_export($data0, 1));
+		if(@$data0["result"] == "error")
 		{
 			echo $data0["msg"] . "\n";
 			exit(2);
 		}
 		if(array_key_exists("success", $data0) and !$data0["success"])
 		{
-			foreach($data0["errors"] as $e)
+			function prnt_error($e)
 			{
 				printf("E%s: %s\n", $e["code"], $e["message"]);
+				foreach((array)@$e["error_chain"] as $e) prnt_error($e);
 			}
+			foreach($data0["errors"] as $e) prnt_error($e);
 			exit(2);
 		}
-
+		
+		if(isset($data0["result_info"]["page"]) and $data0["result_info"]["page"] < $data0["result_info"]["total_pages"])
+		{
+			echo "!has_more\n";
+		}
+		
 		array_shift($argv);
 		$data = $data0;
 		foreach($argv as $param)
@@ -188,7 +302,7 @@ json_decode()
 					{
 						if(array_key_exists($p, $data))
 						{
-							if($p == "objs" and $data["has_more"])
+							if($p == "objs" and @$data["has_more"])
 							{
 								echo "!has_more\n";
 								echo "!count=", $data["count"], "\n";
@@ -260,46 +374,47 @@ json_decode()
 	' "$@"
 }
 
-findout_z_id()
+findout_record()
 {
 	# arguments:
 	#   $1 - record name (eg: sub.example.com)
 	#   $2 - record type, optional (eg: CNAME)
 	#   $3 - 0/1, stop searching at first match, optional
-	# writes global variables: opts[a] opts[z] opts[name] opts[id] opts[type]
+	# writes global variables: zone, zone_id, record_id, record_type, record_ttl, record_content
 	# return code:
-	#   0 - zone name, record id found and stored in opts[z], opts[id] respectively
+	#   0 - zone and record are found and stored in zone, zone_id, record_id, record_type, record_ttl, record_content
 	#   2 - no suitable zone found
 	#   3 - no matching record found
 	#   4 - more than 1 matching record found
-
+	
 	local record_name=${1,,}
-	local record_type=${2^^}
+	record_type=${2^^}
 	local first_match=$3
+	local zname_zid
+	local zid
+	local test_record
+	zone_id=
 	echo -n "Searching zone ... " >&2
-
-	opts[a]=zone_load_multi
-	unset opts[z]
-	for zone in `call_cf .response.zones.objs ,zone_name`
+	
+	for zname_zid in `call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id`
 	do
+		zone=${zname_zid%%:*}
 		zone=${zone,,}
+		zid=${zname_zid##*:}
 		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]
 		then
 			subdomain=${BASH_REMATCH[2]}
-			opts[z]=$zone
+			zone_id=$zid
 			break
 		fi
 	done
-	[ -z "${opts[z]}" ] && { echo >&2; return 2; }
-	echo -n "${opts[z]}, searching ID ... " >&2
-		
-	opts[a]=rec_load_all
-	unset opts[id]
-
+	[ -z "$zone_id" ] && { echo >&2; return 2; }
+	echo -n "$zone, searching record ... " >&2
+	
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in `call_cf .response.recs.objs ,name,type,rec_id,ttl,content`
+	for test_record in `call_cf_v4 GET /zones/$zone_id/dns_records -- .result ,name,type,id,ttl,content`
 	do
 		IFS=$oldIFS
 		set -- $test_record
@@ -309,15 +424,15 @@ findout_z_id()
 			then
 				let rec_found++
 				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
-				opts[name]=$1
+				
 				shift
-				opts[type]=$1
+				record_type=$1
 				shift
-				opts[id]=$1
+				record_id=$1
 				shift
-				opts[ttl]=$1
+				record_ttl=$1
 				shift
-				opts[content]="$@"
+				record_content=$*
 				if [ "$first_match" = 1 ]
 				then
 					# accept first matching record
@@ -328,10 +443,10 @@ findout_z_id()
 		IFS=$NL
 	done
 	IFS=$oldIFS
-
-	echo "${opts[id]}" >&2
-	[ -z "${opts[id]}" ] && return 3
-
+	
+	echo "$record_id" >&2
+	[ -z "$record_id" ] && return 3
+	
 	return 0
 }
 
@@ -354,7 +469,10 @@ do
 		CF_ACCOUNT=$1;;
 	-T)	shift
 		CF_TOKEN=$1;;
-	-v)	verbose=1;;
+	-D|--debug)
+		debug=1;;
+	-d|--detail|--detailed|--details)
+		details=1;;
 	-h|--help)
 		die "$usage_text" 0
 		;;
@@ -401,24 +519,37 @@ list|show)
 	shift
 	case "$cmd2" in
 	zone|zones)
-		opts[a]=zone_load_multi
-		call_cf .response.zones.objs %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ',zone_name,zone_status_class,zone_id,<str_replace(array("{",,"}"),, "",, strtolower($orig_ns_names)),fqdns'
+		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
 	setting|settings)
-		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
-		opts[a]=zone_settings
-		opts[z]=${1,,}
-		call_cf .response.result.objs.0 table
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 settings <zone>"
+		if is_hex "$1"
+		then
+			zone_id=$1
+		else
+			get_zone_id "$1"
+		fi
+		if [ "$details" = 1 ]
+		then
+			fieldspec=,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
+		else
+			fieldspec=,id,value,\"\",\"\"
+		fi
+		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 	record|records)
-		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
-		opts[a]=rec_load_all
-		opts[z]=${1,,}
-		call_cf .response.recs.objs %"%-20s %11s %-8s %s$TA; %s #%s$NL" ',@zone_name@name,?auto_ttl?<"$ttl_ceil(auto)"?ttl,type,?prio?<"$prio $content"?content,!props,rec_id'
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 records <zone>"
+		if is_hex "$1"
+		then
+			zone_id=$1
+		else
+			get_zone_id "$1"
+		fi
+		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
+			',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		;;
-	listing|blocking)
-		opts[a]=ipmgmt_load
-		call_cf .response.ip_rules.objs %"%-15s$TA%s$TA%s$NL" ,ip,rule,edate
+	listing|listings|blocking|blockings)
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	*)
 		die "Parameters:
@@ -432,58 +563,121 @@ add)
 	shift
 	case "$cmd2" in
 	record)
-		opts[a]=rec_new
 		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
-   <zone>      domain zone to register the record in (see \"cloudflare list zones\")
-   <type>      eg. A AAAA CNAME MX NS SRV TXT SPF LOC (case insensitive)
+   <zone>      domain zone to register the record in, see 'show zones' command
+   <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT, SPF, LOC
    <name>      subdomain name, or \"@\" to refer to the domain's root
-   <content>   usually an IP (A, AAAA), a target domain name (CNAME, MX, SRV), or free text (TXT)
+   <content>   IP address for A, AAAA
+               FQDN for CNAME, MX, NS, SRV
+               any text for TXT, spf definition text for SPF
+               coordinates for LOC (see RFC 1876 section 3)
    [ttl]       Time To Live, 1 = auto
    [prio]      required only by MX and SRV records, enter \"10\" if unsure
-   [service]   free service name, eg. \"_sip\" (for SRV record type)
-   [protocol]  _tcp, _udp, _tls (SRV)
+   These ones are only for SRV records:
+   [service]   service name, eg. \"sip\"
+   [protocol]  tcp, udp, tls
    [weight]    relative weight for records with the same priority
-   [port]      layer 4 port number"
-		for prm in z type name content
-		do
-			opts[$prm]=$1
-			shift
-		done
-		opts[type]=${opts[type]^^}
-		opts[content]=${opts[content]//+/%2B}
-		[ -n "$1" ] && opts[ttl]=$1 || opts[ttl]=1
+   [port]      layer-4 port number"
+		
+		zone=$1
 		shift
-		if [ "${opts[type]}" = MX ]
-		then
-			opts[prio]=$1
-			shift
-		elif [ "${opts[type]}" = SRV ]
-		then
-			for prm in prio service protocol weight port
+		type=${1^^}
+		shift 
+		name=$1
+		shift
+		
+		content=$1
+		ttl=$2
+		prio=$3
+		service=$4
+		protocol=$5
+		weight=$6
+		port=$7
+		
+		[ -n "$ttl" ] || ttl=1
+		[ -n "$prio" ] || prio=10
+		get_zone_id "$zone"
+		
+		
+		case "$type" in
+		MX)
+			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl" priority="$prio"
+			;;
+		LOC)
+			locdata=
+			data_separated=1
+			if [ -n "${content//[! ]/}" ]
+			then
+				data_separated=0
+				set -- $content
+			fi
+			for key in lat_degrees lat_minutes lat_seconds lat_direction \
+			  long_degrees long_minutes long_seconds long_direction \
+			  altitude size precision_horz precision_vert
 			do
-				opts[$prm]=$1
+				value=$1
+				value=${value%m}
+				locdata="$locdata${locdata:+,}\"$key\":\"$value\""
 				shift
 			done
-			opts[srvname]=${opts[name]}
-			opts[target]=${opts[content]}
-			[ "${opts[service]:0:1}" != _ ] && opts[service]="_${opts[service]}"
-			[ "${opts[protocol]:0:1}" != _ ] && opts[protocol]="_${opts[protocol]}"
-		fi
-		if [ "${opts[type]}" = MX -a -z "${opts[prio]}" ]
-		then
-			opts[prio]=10
-		fi
-		call_cf "&result&msg"
-		;;
-	whitelist|blacklist)
-		case "$cmd2" in
-		  whitelist)	opts[a]=wl;;
-		  blacklist)	opts[a]=ban;;
+			if [ $data_separated = 1 ]
+			then
+				ttl=${1:-1}
+			fi
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}"
+			;;
+		SRV)
+			[ "${service:0:1}" = _ ] || service="_$service"
+			[ "${protocol:0:1}" = _ ] || protocol="_$protocol"
+			[ -n "$weight" ] || weight=1
+			target=$content
+			
+			call_cf_v4 POST /zones/$zone_id/dns_records "{
+				\"type\":\"$type\",
+				\"ttl\":$ttl,
+				\"data\":{
+					\"service\":\"$service\",
+					\"proto\":\"$protocol\",
+					\"name\":\"$name\",
+					\"priority\":$prio,
+					\"weight\":$weight,
+					\"port\":$port,
+					\"target\":\"$target\"
+					}
+				}"
+			;;
+		*)
+			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl"
+			;;
 		esac
-		[ -z "$1" ] && die "Usage: cloudflare add [whitelist | blacklist] <IP>"
-		opts[key]=$1
-		call_cf "&result&msg"
 		;;
+		
+	whitelist|blacklist|challenge)
+		trg=$1
+		trg_type=
+		shift
+		notes=$*
+		case "$cmd2" in
+		  whitelist)	mode=whitelist;;
+		  blacklist)	mode=block;;
+		  challenge)	mode=challenge;;
+		esac
+		
+		if expr "$trg" : '[0-9\.]\+$' >/dev/null
+		then
+			trg_type=ip
+		elif expr "$trg" : '[0-9\.]\+/[0-9]\+$' >/dev/null
+		then
+			trg_type=ip_range
+		elif expr "$trg" : '[A-Z]\+$' >/dev/null
+		then
+			trg_type=country
+		fi
+		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
+		
+		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
+		;;
+		
 	zone)
 		if [ $# != 1 ]
 		then
@@ -491,9 +685,10 @@ add)
 		fi
 		call_cf_v4 POST /zones name="$1" -- .result '&<"status: $status"'
 		;;
+		
 	*)
 		die "Parameters:
-   zone, record, whitelist, blacklist"
+   zone, record, whitelist, blacklist, challenge"
 	esac
 	;;
 	
@@ -507,20 +702,25 @@ delete)
 		shift
 		shift
 		
-		if is_integer "$prm2"
+		if is_hex "$prm2"
 		then
 			if [ -n "$1" ]
 			then
 				die "Unknown parameters: $@"
 			fi
-			opts[id]=$prm2
-			opts[z]=$prm1
+			if is_hex "$prm1"
+			then
+				zone_id=$prm1
+			else
+				get_zone_id "$prm1"
+			fi
+			record_id=$prm2
 		
 		else
 			record_type=
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [zone] <record-id>]"
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [<zone-name>|<zone-id>] <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -529,7 +729,7 @@ delete)
 				record_type=${prm2^^}
 			fi
 			
-			findout_z_id "$prm1" "$record_type" "$first_match"
+			findout_record "$prm1" "$record_type" "$first_match"
 			case $? in
 			0)	true;;
 			2)	die "No suitable DNS zone found for \`$prm1'";;
@@ -537,18 +737,27 @@ delete)
 			4)	die "Ambiguous record spec: \`$prm1'";;
 			*)	die "Internal error";;
 			esac
-			
 		fi
 		
-		opts[a]=rec_delete
-		call_cf "&result&msg"
+		call_cf_v4 DELETE /zones/$zone_id/dns_records/$record_id
 		;;
+		
 	listing)
-		opts[a]=nul
-		[ -z "$1" ] && die "Usage: cloudflare delete listing <IP>"
-		opts[key]=$1
-		call_cf "&result&msg"
+		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [\"first\"]"
+		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
+		while read ruleid trg notes
+		do
+			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
+			then
+				call_cf_v4 DELETE /user/firewall/access_rules/rules/$ruleid
+				if [ "$2" = first ]
+				then
+					break
+				fi
+			fi
+		done
 		;;
+		
 	zone)
 		if [ $# != 1 ]
 		then
@@ -557,6 +766,7 @@ delete)
 		get_zone_id "$1"
 		call_cf_v4 DELETE /zones/$zone_id
 		;;
+		
 	*)
 		die "Parameters:
    zone, record, listing"
@@ -568,127 +778,134 @@ change|set)
 	shift
 	case "$cmd2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> [setting] [value]"
-		opts[z]=$1
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
+		[ -z "$2" ] && die "Settings:
+   security_level [under_attack | high | medium | low | essentially_off]
+   cache_level [aggressive | basic | simplified]
+   rocket_loader [on | off | manual]
+   minify <any variation of css, html, js delimited by comma>
+   development_mode [on | off]
+   mirage [on | off]
+   ipv6 [on | off]
+Other: see output of 'show zone' command"
+		get_zone_id "$1"
 		shift
+		setting_items=
 		
-		case "$1" in
-		security_level|sec_lvl)
-			opts[a]=sec_lvl
-			opts[v]=$2
-			call_cf "&result&msg"
+		declare -A map
+		map[sec_lvl]=security_level
+		map[cache_lvl]=cache_level
+		map[rocket_ldr]=rocket_loader
+		map[async]=rocket_loader
+		map[devmode]=development_mode
+		map[dev_mode]=development_mode
+		
+		while [ -n "$1" ]
+		do
+			setting=$1
+			shift
+			[ -n "${map[$setting]}" ] && setting=${map[$setting]}
+			setting_value=$1
+			shift
+			
+			case "$setting" in 
+			minify)
+				css=off
+				html=off
+				js=off
+				for s in ${setting_value//,/ }
+				do
+					case "$s" in
+					css|html|js) eval $s=on;;
+					*) die "E.g: cloudflare $cmd1 zone <zone> minify css,html,js"
+					esac
+				done
+				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
 			;;
-		cache_level|cache_lvl)
-			opts[a]=cache_lvl
-			opts[v]=$2
-			call_cf "&result&msg"
-			;;
-		rocket_loader|rocket_ldr|async)
-			opts[a]=async
-			opts[v]=$2
-			[ "$2" = off ] && opts[v]=0
-			[ "$2" = auto ] && opts[v]=a
-			[ "$2" = manual ] && opts[v]=m
-			call_cf "&result&msg"
-			;;
-		minify)
-			opts[a]=minify
-			opts[v]=$2
-			call_cf "&result&msg"
-			;;
-		devmode|dev_mode)
-			opts[a]=devmode
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=1
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		mirage2)
-			opts[a]=mirage2
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=1
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		ipv6)
-			opts[a]=ipv46
-			opts[v]=$2
-			[ "$2" = on ] && opts[v]=3
-			[ "$2" = off ] && opts[v]=0
-			call_cf "&result&msg"
-			;;
-		*)
-			die "Parameters:
-   sec_lvl [help | high | med | low | eoff]
-   cache_lvl [agg | basic]
-   rocket_loader [off | auto | manual]
-   minify <bitmask>
-       bit 1 = JS
-       bit 2 = CSS
-       bit 3 = HTML
-   devmode [on | off]
-   mirage2 [on | off]
-   ipv6 [on | off]"
-			;;
-		esac
+			esac
+			
+			if [ "${setting_value:0:1}" != '{' ]
+			then
+				setting_value="\"$setting_value\""
+			fi
+			setting_items="$setting_items${setting_items:+,}{\"id\":\"$setting\",\"value\":$setting_value}"
+		done
+		
+		call_cf_v4 PATCH /zones/$zone_id/settings "{\"items\":[$setting_items]}"
 		;;
+		
 	record)
-		str1="Usage: cloudflare set record <record> [\"type\" <type> | \"first\"] [<parameter> <value>] [<parameter> <value>] ...
-You must enter record type (A, MX, ...) when there are more records with the same name, or enter \"first\" to modify the first matching record in the zone.
-Parameters:
-  content        Usually IP address, or target for MX and CNAME
-  service_mode   Turn CF proxying on (1) or off (0)
-  for other parameters see 'add record' command."
+		str1="Usage: cloudflare $cmd1 record <name> [\"type\" <type> | \"first\"] <setting> <value> [<setting> <value> [ ... ]]
+You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
+Settings:
+  name           Rename the record
+  [new]type      Change type
+  content        See description in 'add record' command
+  ttl            See description in 'add record' command
+  proxied        Turn CF proxying on/off"
 		[ -z "$1" ] && die "$str1"
 		record_name=$1
 		shift
 		record_type=
 		first_match=0
-
+		
 		while [ -n "$1" ]
 		do
-			if [ "$1" = first ]
-			then
-				first_match=1
-				shift
-			elif [ "$1" = type ]
-			then
-				shift
-				record_type=${1^^}
-				shift
-			else
-				break
-			fi
+			case "$1" in
+			first)	first_match=1;;
+			type)	shift; record_type=${1^^};;
+			*)		break;;
+			esac
+			shift
 		done
-
+		
 		if [ -z "$1" ]
 		then
 			die "$str1"
 	   	fi
-
-		findout_z_id "$record_name" "$record_type" "$first_match"
+		
+		findout_record "$record_name" "$record_type" "$first_match"
 		e=$?
 		case $e in
 		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
 		3)	die "DNS record \`$record_name' not found";;
-		4)	die "Ambiguous record name: \`$record_name', specify \"type\" parameter!";;
+		4)	die "Ambiguous record name: \`$record_name'";;
 		*)	die "Internal error";;
 		esac
 		
+		record_content_esc=${record_content//\"/\\\"}
+		old_data="\"name\":\"$record_name\",\"type\":\"$record_type\",\"ttl\":$record_ttl,\"content\":\"$record_content_esc\""
+		new_data=
 		while [ -n "$1" ]
 		do
-			param=$1
-			new=$2
-			[ "$param" != z -a "$param" != id -a -n "$new" ] && opts[$param]=$new
+			setting=$1
 			shift
+			value=$1
 			shift
+			
+			[ "$setting" = service_mode ] && setting=proxied
+			[ "$setting" = newtype -o "$setting" = new_type ] && setting=type
+			if [ "$setting" = proxied ]
+			then
+				value=${value,,}
+				[ "$value" = on -o "$value" = 1 ] && value=true
+				[ "$value" = off -o "$value" = 0 ] && value=false
+			fi
+			[ "$setting" = type ] && value=${value^^}
+			
+			if expr "$value" : '[0-9\.]\+$' >/dev/null || [ "$value" = true -o "$value" = false ]
+			then
+				value_escq=$value
+			else
+				value_escq=\"${value//\"/\\\"}\"
+			fi
+			new_data="$new_data${new_data:+,}\"$setting\":$value_escq"
 		done
-
-		opts[a]=rec_edit
 		
-		call_cf "&result&msg"
+		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}"
 		;;
+		
 	*)
 		die "Parameters:
    zone, record"
@@ -700,10 +917,8 @@ clear)
 	cache)
 		shift
 		[ -z "$1" ] && die "Usage: cloudflare clear cache <zone>"
-		opts[a]=rec_load_all
-		opts[z]=$1
-		opts[v]=1
-		call_cf "&result&msg"
+		get_zone_id "$1"
+		call_cf_v4 DELETE /zones/$zone_id/purge_cache '{"purge_everything":true}'
 		;;
 	*)
 		die "Parameters:
@@ -760,7 +975,7 @@ invalidate)
 		done
 		if [ -z "$zone_id" ]
 		then
-			die "Zone name could not figured out."
+			die "Zone name could not be figured out."
 		fi
 		call_cf_v4 DELETE /zones/$zone_id/purge_cache "{\"files\":[$urls]}"
 	else
@@ -774,7 +989,7 @@ json)
 	
 *|help)
 	die "Commands:
-   show, add, delete, set, clear, invalidate check"
+   show, add, delete, change, clear, invalidate, check"
 	;;
 esac
 
