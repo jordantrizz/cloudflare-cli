@@ -522,7 +522,7 @@ list|show)
 		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
 	setting|settings)
-		[ -z "$1" ] && die "Usage: cloudflare list settings <zone>"
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 settings <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -538,7 +538,7 @@ list|show)
 		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 	record|records)
-		[ -z "$1" ] && die "Usage: cloudflare list records <zone>"
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 records <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -564,7 +564,7 @@ add)
 	case "$cmd2" in
 	record)
 		[ $# -lt 4 ] && die "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
-   <zone>      domain zone to register the record in, see 'list zones' command
+   <zone>      domain zone to register the record in, see 'show zones' command
    <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT, SPF, LOC
    <name>      subdomain name, or \"@\" to refer to the domain's root
    <content>   IP address for A, AAAA
@@ -708,14 +708,19 @@ delete)
 			then
 				die "Unknown parameters: $@"
 			fi
+			if is_hex "$prm1"
+			then
+				zone_id=$prm1
+			else
+				get_zone_id "$prm1"
+			fi
 			record_id=$prm2
-			get_zone_id "$prm1"
 		
 		else
 			record_type=
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<name> [<type> | \"first\"] | <zone> <record-id>]"
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [<zone-name>|<zone-id>] <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -773,7 +778,7 @@ change|set)
 	shift
 	case "$cmd2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare set zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
+		[ -z "$1" ] && die "Usage: cloudflare $cmd1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
 		[ -z "$2" ] && die "Settings:
    security_level [under_attack | high | medium | low | essentially_off]
    cache_level [aggressive | basic | simplified]
@@ -812,7 +817,7 @@ Other: see output of 'show zone' command"
 				do
 					case "$s" in
 					css|html|js) eval $s=on;;
-					*) die "E.g: cloudflare set zone <zone> minify css,html,js"
+					*) die "E.g: cloudflare $cmd1 zone <zone> minify css,html,js"
 					esac
 				done
 				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
@@ -830,7 +835,7 @@ Other: see output of 'show zone' command"
 		;;
 		
 	record)
-		str1="Usage: cloudflare set record <name> [\"type\" <type> | \"first\"] <setting> <value> [<setting> <value> [ ... ]]
+		str1="Usage: cloudflare $cmd1 record <name> [\"type\" <type> | \"first\"] <setting> <value> [<setting> <value> [ ... ]]
 You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
 Settings:
   name           Rename the record
@@ -984,7 +989,7 @@ json)
 	
 *|help)
 	die "Commands:
-   show, add, delete, set, clear, invalidate, check"
+   show, add, delete, change, clear, invalidate, check"
 	;;
 esac
 
