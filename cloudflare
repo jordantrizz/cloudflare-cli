@@ -949,7 +949,7 @@ invalidate)
 		zone_id=
 		for url in "$@"
 		do
-			urls="${urls:+,}\"$url\""
+			urls="${urls:+$urls,}\"$url\""
 			if [ -z "$zone_id" ]
 			then
 				if [[ "$url" =~ ^([^:]+:)?/*([^:/]+) ]]
