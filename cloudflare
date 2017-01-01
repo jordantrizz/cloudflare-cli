@@ -720,7 +720,7 @@ delete)
 			record_type=
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type>|\"first\"] | [<zone-name>|<zone-id>] <record-id>]"
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type> | first] | [<zone-name>|<zone-id>] <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -743,7 +743,7 @@ delete)
 		;;
 		
 	listing)
-		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [\"first\"]"
+		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
 		while read ruleid trg notes
 		do
@@ -835,7 +835,7 @@ Other: see output of 'show zone' command"
 		;;
 		
 	record)
-		str1="Usage: cloudflare $cmd1 record <name> [\"type\" <type> | \"first\"] <setting> <value> [<setting> <value> [ ... ]]
+		str1="Usage: cloudflare $cmd1 record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
 You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
 Settings:
   name           Rename the record
@@ -894,7 +894,7 @@ Settings:
 			fi
 			[ "$setting" = type ] && value=${value^^}
 			
-			if expr "$value" : '[0-9\.]\+$' >/dev/null || [ "$value" = true -o "$value" = false ]
+			if expr "$value" : '[0-9]\+$' >/dev/null || expr "$value" : '[0-9]\+\.[0-9]\+$' >/dev/null || [ "$value" = true -o "$value" = false ]
 			then
 				value_escq=$value
 			else

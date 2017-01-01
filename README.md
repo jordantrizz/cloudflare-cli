@@ -121,7 +121,7 @@ Usage: cloudflare delete zone <name>
 
 ```
 $ cloudflare delete record
-Usage: cloudflare delete record [<record-name> [<type>|"first"] | [<zone-name>|<zone-id>] <record-id>]
+Usage: cloudflare delete record [<record-name> [<type> | first] | [<zone-name>|<zone-id>] <record-id>]
 ```
 
 ```
@@ -134,7 +134,7 @@ $ cloudflare delete record example.net 1234567890abcdef1234567890abcdef
 
 ```
 $ cloudflare delete listing
-Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] ["first"]
+Usage: cloudflare delete listing [<IP | IP range | country_code | ID | note_fragment>] [first]
 ```
 
 ```
@@ -163,7 +163,7 @@ Other: see output of 'show zone' command
 
 ```
 $ cloudflare change record
-Usage: cloudflare set record <name> ["type" <type> | "first"] <setting> <value> [<setting> <value> [ ... ]]
+Usage: cloudflare set record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
 You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter "first" to modify the first matching record in the zone.
 Settings:
   name           Rename the record
