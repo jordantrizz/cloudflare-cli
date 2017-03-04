@@ -70,18 +70,19 @@ else
 fi
 
 
+echo "Record current IP: $currentip" >&2
 if [ "$latestip" != "$currentip" ]
 then
-	echo "Record current IP: $currentip" >&2
 	if [ -n "$subdom" ]
 	then
 		cloudflare add record "$zone" A "$tstamp.$subdom" "$currentip"
 	fi
-	for dyn in "${dyns[@]}"
-	do
-		cloudflare set record "$dyn.$zone" type A content "$currentip"
-	done
 else
-	echo "Up to date" >&2
+	echo "Up to date: $tstamp.$subdom.$zone" >&2
 fi
+
+for dyn in "${dyns[@]}"
+do
+	cloudflare set record "$dyn.$zone" type A content "$currentip"
+done
 
