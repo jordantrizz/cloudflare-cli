@@ -1,11 +1,9 @@
 #!/bin/bash
 
-declare -A opts
 debug=0
 details=0
 NL=$'\n'
 TA=$'\t'
-APIv1_ENDPOINT=https://www.cloudflare.com/api_json.html
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 usage_text=\
 "Usage: cloudflare [Options] <command> <parameters>
@@ -41,33 +39,6 @@ is_hex()
 	expr "$1" : '[0-9a-fA-F]\+$' >/dev/null
 }
 
-call_cf()
-{
-	local exitcode=0
-	declare -a curl_opts
-	while true
-	do
-		curl_opts=()
-		for oname in "${!opts[@]}"
-		do
-			curl_opts+=(-d "$oname=${opts[$oname]}")
-		done
-		
-		output=`curl -sS "$APIv1_ENDPOINT" "${curl_opts[@]}" | json_decode "$@"`
-		exitcode=$?
-		sed -e '/^!/d' <<<"$output"
-		
-		if grep -qE '^!has_more' <<<"$output"
-		then
-			count=`grep -E ^!count= <<<"$output" | cut -f2 -d=`
-			let opts[o]+=$count
-		else
-			unset opts[o]
-			break
-		fi
-	done
-	return $exitcode
-}
 
 call_cf_v4()
 {
@@ -497,9 +468,6 @@ then
 
 $usage_text"
 fi
-
-opts[email]=$CF_ACCOUNT
-opts[tkn]=$CF_TOKEN
 
 
 if [ -z "$1" ]
