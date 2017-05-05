@@ -24,6 +24,11 @@ die()
 	exit ${2:-1}
 }
 
+if [ $BASH_VERSINFO -lt 4 ]
+then
+	die "Sorry, you need at least bash 4.0 to run this script." 1
+fi
+
 is_debug()
 {
 	[ "$debug" = 1 ]
