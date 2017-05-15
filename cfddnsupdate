@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 conffile=/etc/cfddnsupdate.conf
 [ -n "$1" ] && conffile=$1
