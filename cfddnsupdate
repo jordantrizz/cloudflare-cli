@@ -51,6 +51,7 @@ then
 			
 			iplog[$tag]=$ip
 			latestip=$ip
+			lastchange=$tag
 		done
 	fi
 	IFS=$'\n\t '
@@ -73,16 +74,22 @@ fi
 echo "Record current IP: $currentip" >&2
 if [ "$latestip" != "$currentip" ]
 then
+	if type cfddnsupdate-callback >/dev/null 2>&1
+	then
+		cfddnsupdate-callback "$latestip" "$lastchange" "$currentip"
+	fi
+	lastchange=$tstamp
 	if [ -n "$subdom" ]
 	then
 		cloudflare add record "$zone" A "$tstamp.$subdom" "$currentip"
 	fi
 else
-	echo "Up to date: $tstamp.$subdom.$zone" >&2
+	echo "Last IP is up to date" >&2
 fi
 
 for dyn in "${dyns[@]}"
 do
+	# Update dynamic records anyway
 	cloudflare set record "$dyn.$zone" type A content "$currentip"
 done
 
