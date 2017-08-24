@@ -11,6 +11,7 @@ Usage: cloudflare [Options] <command> <parameters>
 Options:
  --details, -d    Display detailed info where possible
  --debug, -D      Display API debugging info
+ --quiet, -q      Less verbose
  -E <email>
  -T <api_token>
 Environment variables:
