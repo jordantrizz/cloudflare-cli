@@ -667,7 +667,7 @@ add)
 		then
 			die "Usage: cloudflare add zone <name>"
 		fi
-		call_cf_v4 POST /zones name="$1" -- .result '&<"status: $status"'
+		call_cf_v4 POST /zones "{\"name\":\"$1\",\"jump_start\":true}" -- .result '&<"status: $status"'
 		;;
 		
 	*)
