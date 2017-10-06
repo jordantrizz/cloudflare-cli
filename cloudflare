@@ -686,7 +686,7 @@ delete)
 		shift
 		shift
 		
-		if is_hex "$prm2"
+		if [ ${#prm2} = 32 ] && is_hex "$prm2"
 		then
 			if [ -n "$1" ]
 			then
