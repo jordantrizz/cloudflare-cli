@@ -1,17 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-declare -A opts
 debug=0
 details=0
+quiet=0
 NL=$'\n'
 TA=$'\t'
-APIv1_ENDPOINT=https://www.cloudflare.com/api_json.html
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 usage_text=\
 "Usage: cloudflare [Options] <command> <parameters>
 Options:
  --details, -d    Display detailed info where possible
  --debug, -D      Display API debugging info
+ --quiet, -q      Less verbose
  -E <email>
  -T <api_token>
 Environment variables:
@@ -22,13 +22,25 @@ Enter \"cloudflare help\" to list available commands."
 
 die()
 {
-	echo "$1" >&2
+	if [ -n "$1" ]
+	then
+		echo "$1" >&2
+	fi
 	exit ${2:-1}
 }
+
+if [ $BASH_VERSINFO -lt 4 ]
+then
+	die "Sorry, you need at least bash 4.0 to run this script." 1
+fi
 
 is_debug()
 {
 	[ "$debug" = 1 ]
+}
+is_quiet()
+{
+	[ "$quiet" = 1 ]
 }
 
 is_integer()
@@ -41,33 +53,6 @@ is_hex()
 	expr "$1" : '[0-9a-fA-F]\+$' >/dev/null
 }
 
-call_cf()
-{
-	local exitcode=0
-	declare -a curl_opts
-	while true
-	do
-		curl_opts=()
-		for oname in "${!opts[@]}"
-		do
-			curl_opts+=(-d "$oname=${opts[$oname]}")
-		done
-		
-		output=`curl -sS "$APIv1_ENDPOINT" "${curl_opts[@]}" | json_decode "$@"`
-		exitcode=$?
-		sed -e '/^!/d' <<<"$output"
-		
-		if grep -qE '^!has_more' <<<"$output"
-		then
-			count=`grep -E ^!count= <<<"$output" | cut -f2 -d=`
-			let opts[o]+=$count
-		else
-			unset opts[o]
-			break
-		fi
-	done
-	return $exitcode
-}
 
 call_cf_v4()
 {
@@ -393,8 +378,8 @@ findout_record()
 	local zname_zid
 	local zid
 	local test_record
-	zone_id=
-	echo -n "Searching zone ... " >&2
+	zone_id=''
+	is_quiet || echo -n "Searching zone ... " >&2
 	
 	for zname_zid in `call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id`
 	do
@@ -408,8 +393,8 @@ findout_record()
 			break
 		fi
 	done
-	[ -z "$zone_id" ] && { echo >&2; return 2; }
-	echo -n "$zone, searching record ... " >&2
+	[ -z "$zone_id" ] && { is_quiet || echo >&2; return 2; }
+	is_quiet || echo -n "$zone, searching record ... " >&2
 	
 	rec_found=0
 	oldIFS=$IFS
@@ -423,7 +408,7 @@ findout_record()
 			if [ -z "$record_type" -o "$2" = "$record_type" ]
 			then
 				let rec_found++
-				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
+				[ $rec_found -gt 1 ] && { is_quiet || echo >&2; return 4; }
 				
 				shift
 				record_type=$1
@@ -444,7 +429,7 @@ findout_record()
 	done
 	IFS=$oldIFS
 	
-	echo "$record_id" >&2
+	is_quiet || echo "$record_id" >&2
 	[ -z "$record_id" ] && return 3
 	
 	return 0
@@ -473,6 +458,8 @@ do
 		debug=1;;
 	-d|--detail|--detailed|--details)
 		details=1;;
+	-q|--quiet)
+		quiet=1;;
 	-h|--help)
 		die "$usage_text" 0
 		;;
@@ -497,9 +484,6 @@ then
 
 $usage_text"
 fi
-
-opts[email]=$CF_ACCOUNT
-opts[tkn]=$CF_TOKEN
 
 
 if [ -z "$1" ]
@@ -604,7 +588,7 @@ add)
 			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl" priority="$prio"
 			;;
 		LOC)
-			locdata=
+			locdata=''
 			data_separated=1
 			if [ -n "${content//[! ]/}" ]
 			then
@@ -654,7 +638,7 @@ add)
 		
 	whitelist|blacklist|block|challenge)
 		trg=$1
-		trg_type=
+		trg_type=''
 		shift
 		notes=$*
 		case "$cmd2" in
@@ -683,7 +667,7 @@ add)
 		then
 			die "Usage: cloudflare add zone <name>"
 		fi
-		call_cf_v4 POST /zones name="$1" -- .result '&<"status: $status"'
+		call_cf_v4 POST /zones "{\"name\":\"$1\",\"jump_start\":true}" -- .result '&<"status: $status"'
 		;;
 		
 	*)
@@ -702,7 +686,7 @@ delete)
 		shift
 		shift
 		
-		if is_hex "$prm2"
+		if [ ${#prm2} = 32 ] && is_hex "$prm2"
 		then
 			if [ -n "$1" ]
 			then
@@ -717,7 +701,7 @@ delete)
 			record_id=$prm2
 		
 		else
-			record_type=
+			record_type=''
 			first_match=0
 			
 			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type> | first] | [<zone-name>|<zone-id>] <record-id>]"
@@ -790,7 +774,7 @@ change|set)
 Other: see output of 'show zone' command"
 		get_zone_id "$1"
 		shift
-		setting_items=
+		setting_items=''
 		
 		declare -A map
 		map[sec_lvl]=security_level
@@ -846,7 +830,7 @@ Settings:
 		[ -z "$1" ] && die "$str1"
 		record_name=$1
 		shift
-		record_type=
+		record_type=''
 		first_match=0
 		
 		while [ -n "$1" ]
@@ -869,14 +853,14 @@ Settings:
 		case $e in
 		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	die "DNS record \`$record_name' not found";;
+		3)	is_quiet && die || die "DNS record \`$record_name' not found";;
 		4)	die "Ambiguous record name: \`$record_name'";;
 		*)	die "Internal error";;
 		esac
 		
 		record_content_esc=${record_content//\"/\\\"}
 		old_data="\"name\":\"$record_name\",\"type\":\"$record_type\",\"ttl\":$record_ttl,\"content\":\"$record_content_esc\""
-		new_data=
+		new_data=''
 		while [ -n "$1" ]
 		do
 			setting=$1
@@ -945,8 +929,8 @@ check)
 invalidate)
 	if [ -n "$1" ]
 	then
-		urls=
-		zone_id=
+		urls=''
+		zone_id=''
 		for url in "$@"
 		do
 			urls="${urls:+$urls,}\"$url\""

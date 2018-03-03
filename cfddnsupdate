@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 conffile=/etc/cfddnsupdate.conf
 [ -n "$1" ] && conffile=$1
@@ -8,7 +8,8 @@ declare -a dyns
 set +e
 
 tstamp=`date +%s`
-latestip=
+latestip=''
+lastchange=''
 
 
 if [ -z "$zone" ]
@@ -51,6 +52,7 @@ then
 			
 			iplog[$tag]=$ip
 			latestip=$ip
+			lastchange=$tag
 		done
 	fi
 	IFS=$'\n\t '
@@ -70,18 +72,26 @@ else
 fi
 
 
+echo "Record current IP: $currentip" >&2
 if [ "$latestip" != "$currentip" ]
 then
-	echo "Record current IP: $currentip" >&2
+	if type cfddnsupdate-callback >/dev/null 2>&1
+	then
+		cfddnsupdate-callback "$latestip" "$lastchange" "$currentip"
+	fi
+	lastchange=$tstamp
 	if [ -n "$subdom" ]
 	then
 		cloudflare add record "$zone" A "$tstamp.$subdom" "$currentip"
 	fi
-	for dyn in "${dyns[@]}"
-	do
-		cloudflare set record "$dyn.$zone" type A content "$currentip"
-	done
 else
-	echo "Up to date" >&2
+	echo "Last IP is up to date" >&2
 fi
+
+for dyn in "${dyns[@]}"
+do
+	# Update dynamic records anyway
+	cloudflare set record "$dyn.$zone" type A content "$currentip"
+	cloudflare -q set record "lastchange.$dyn.$zone" type TXT content "${lastchange:-$tstamp}"
+done
 
