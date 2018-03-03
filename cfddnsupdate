@@ -9,6 +9,7 @@ set +e
 
 tstamp=`date +%s`
 latestip=''
+lastchange=''
 
 
 if [ -z "$zone" ]
@@ -91,6 +92,6 @@ for dyn in "${dyns[@]}"
 do
 	# Update dynamic records anyway
 	cloudflare set record "$dyn.$zone" type A content "$currentip"
-	cloudflare -q set record "lastchange.$dyn.$zone" type TXT content "$lastchange"
+	cloudflare -q set record "lastchange.$dyn.$zone" type TXT content "${lastchange:-$tstamp}"
 done
 
