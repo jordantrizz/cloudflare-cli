@@ -585,7 +585,7 @@ add)
 		
 		case "$type" in
 		MX)
-			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl" priority="$prio"
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}"
 			;;
 		LOC)
 			locdata=''
@@ -631,7 +631,7 @@ add)
 				}"
 			;;
 		*)
-			call_cf_v4 POST /zones/$zone_id/dns_records type="$type" name="$name" content="$content" ttl="$ttl"
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
 			;;
 		esac
 		;;
