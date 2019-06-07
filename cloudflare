@@ -704,7 +704,7 @@ delete)
 			record_type=''
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<type> | first] | [<zone-name>|<zone-id>] <record-id>]"
+			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -822,8 +822,8 @@ Other: see output of 'show zone' command"
 		str1="Usage: cloudflare $cmd1 record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
 You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
 Settings:
-  name           Rename the record
-  [new]type      Change type
+  newname        Rename the record
+  newtype        Change type
   content        See description in 'add record' command
   ttl            See description in 'add record' command
   proxied        Turn CF proxying on/off"
@@ -870,6 +870,7 @@ Settings:
 			
 			[ "$setting" = service_mode ] && setting=proxied
 			[ "$setting" = newtype -o "$setting" = new_type ] && setting=type
+			[ "$setting" = newname -o "$setting" = new_name ] && setting=name
 			if [ "$setting" = proxied ]
 			then
 				value=${value,,}

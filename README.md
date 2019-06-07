@@ -122,7 +122,7 @@ Usage: cloudflare delete zone <name>
 
 ```
 $ cloudflare delete record
-Usage: cloudflare delete record [<record-name> [<type> | first] | [<zone-name>|<zone-id>] <record-id>]
+Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]
 ```
 
 ```
@@ -167,8 +167,8 @@ $ cloudflare change record
 Usage: cloudflare set record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
 You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter "first" to modify the first matching record in the zone.
 Settings:
-  name           Rename the record
-  [new]type      Change type
+  newname        Rename the record
+  newtype        Change type
   content        See description in 'add record' command
   ttl            See description in 'add record' command
   proxied        Turn CF proxying on/off
