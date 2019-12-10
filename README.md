@@ -164,8 +164,10 @@ Other: see output of 'show zone' command
 
 ```
 $ cloudflare change record
-Usage: cloudflare set record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
-You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter "first" to modify the first matching record in the zone.
+Usage: cloudflare set record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
+You must enter "type" and the record type (A, MX, ...) when the record name is ambiguous,
+or enter "first" to modify the first matching record in the zone,
+or enter "oldcontent" and the exact content of the record you want to modify if there are more records with the same name and type.
 Settings:
   newname        Rename the record
   newtype        Change type

@@ -365,6 +365,7 @@ findout_record()
 	#   $1 - record name (eg: sub.example.com)
 	#   $2 - record type, optional (eg: CNAME)
 	#   $3 - 0/1, stop searching at first match, optional
+	#   $4 - record content to match to
 	# writes global variables: zone, zone_id, record_id, record_type, record_ttl, record_content
 	# return code:
 	#   0 - zone and record are found and stored in zone, zone_id, record_id, record_type, record_ttl, record_content
@@ -373,12 +374,17 @@ findout_record()
 	#   4 - more than 1 matching record found
 	
 	local record_name=${1,,}
-	record_type=${2^^}
+	declare -g record_type=${2^^}
 	local first_match=$3
+	local record_oldcontent=$4
 	local zname_zid
 	local zid
 	local test_record
-	zone_id=''
+	declare -g zone_id=''
+	declare -g zone=''
+	declare -g record_id=''
+	declare -g record_ttl=''
+	declare -g record_content=''
 	is_quiet || echo -n "Searching zone ... " >&2
 	
 	for zname_zid in `call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id`
@@ -403,21 +409,28 @@ findout_record()
 	do
 		IFS=$oldIFS
 		set -- $test_record
-		if [ "$1" = "$record_name" ]
+		test_record_name=$1
+		shift
+		
+		if [ "$test_record_name" = "$record_name" ]
 		then
-			if [ -z "$record_type" -o "$2" = "$record_type" ]
+			test_record_type=$1
+			shift
+			test_record_id=$1
+			shift
+			test_record_ttl=$1
+			shift
+			test_record_content=$*
+			
+			if [ \( -z "$record_type" -o "$test_record_type" = "$record_type" \) -a \( -z "$record_oldcontent" -o "$test_record_content" = "$record_oldcontent" \) ]
 			then
 				let rec_found++
 				[ $rec_found -gt 1 ] && { is_quiet || echo >&2; return 4; }
 				
-				shift
-				record_type=$1
-				shift
-				record_id=$1
-				shift
-				record_ttl=$1
-				shift
-				record_content=$*
+				record_type=$test_record_type
+				record_id=$test_record_id
+				record_ttl=$test_record_ttl
+				record_content=$test_record_content
 				if [ "$first_match" = 1 ]
 				then
 					# accept first matching record
@@ -819,8 +832,10 @@ Other: see output of 'show zone' command"
 		;;
 		
 	record)
-		str1="Usage: cloudflare $cmd1 record <name> [type <type> | first] <setting> <value> [<setting> <value> [ ... ]]
-You must enter record type (A, MX, ...) when the record's name is ambiguous, or enter \"first\" to modify the first matching record in the zone.
+		str1="Usage: cloudflare $cmd1 record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
+You must enter \"type\" and the record type (A, MX, ...) when the record name is ambiguous, 
+or enter \"first\" to modify the first matching record in the zone,
+or enter \"oldcontent\" and the exact content of the record you want to modify if there are more records with the same name and type.
 Settings:
   newname        Rename the record
   newtype        Change type
@@ -832,12 +847,14 @@ Settings:
 		shift
 		record_type=''
 		first_match=0
+		record_oldcontent=''
 		
 		while [ -n "$1" ]
 		do
 			case "$1" in
 			first)	first_match=1;;
 			type)	shift; record_type=${1^^};;
+			oldcontent)	shift; record_oldcontent=$1;;
 			*)		break;;
 			esac
 			shift
@@ -848,7 +865,7 @@ Settings:
 			die "$str1"
 	   	fi
 		
-		findout_record "$record_name" "$record_type" "$first_match"
+		findout_record "$record_name" "$record_type" "$first_match" "$record_oldcontent"
 		e=$?
 		case $e in
 		0)	true;;
@@ -871,6 +888,7 @@ Settings:
 			[ "$setting" = service_mode ] && setting=proxied
 			[ "$setting" = newtype -o "$setting" = new_type ] && setting=type
 			[ "$setting" = newname -o "$setting" = new_name ] && setting=name
+			[ "$setting" = newcontent ] && setting=content
 			if [ "$setting" = proxied ]
 			then
 				value=${value,,}
