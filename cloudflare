@@ -17,6 +17,13 @@ Options:
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
+
+Configuration file for credentials:
+ Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
+
+ CF_ACCOUNT=example@example.com
+ CF_TOKEN=<token>
+
 Enter \"cloudflare help\" to list available commands."
 
 
@@ -485,19 +492,39 @@ do
 done
 
 
-if [ -z "$CF_ACCOUNT" ]
-then
-	die "No \$CF_ACCOUNT set.
+if [ ! -f "$HOME/.cloudflare" ]
+	then
+		echo "No .cloudflare file."
+	if [ -z "$CF_ACCOUNT" ]
+	then
+		die "No \$CF_ACCOUNT set.
 
-$usage_text"
+	$usage_text"
+	fi
+	if [ -z "$CF_TOKEN" ]
+	then
+		die "No \$CF_TOKEN set.
+
+	$usage_text"
+	fi
+else
+	if is_debug; then echo "Found .cloudflare file."; fi
+	source $HOME/.cloudflare
+	if is_debug; then echo "Sourced CF_ACCOUNT: $CF_ACCOUNT CF_TOKEN: $CF_TOKEN"; fi
+	
+        if [ -z "$CF_ACCOUNT" ]
+        then
+                die "No \$CF_ACCOUNT set in config.
+
+        $usage_text"
+        fi
+        if [ -z "$CF_TOKEN" ]
+        then
+                die "No \$CF_TOKEN set in config.
+
+        $usage_text"
+        fi
 fi
-if [ -z "$CF_TOKEN" ]
-then
-	die "No \$CF_TOKEN set.
-
-$usage_text"
-fi
-
 
 if [ -z "$1" ]
 then
