@@ -8,6 +8,10 @@ TA=$'\t'
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 usage_text=\
 "Usage: cloudflare [Options] <command> <parameters>
+
+Commands:
+   show, add, delete, change, clear, invalidate, check
+
 Options:
  --details, -d    Display detailed info where possible
  --debug, -D      Display API debugging info
@@ -1019,7 +1023,35 @@ json)
 	
 *|help)
 	die "Commands:
-   show, add, delete, change, clear, invalidate, check"
+   show, add, delete, change, clear, invalidate, check
+
+show        zones, settings, records, listing
+add         zone, record, whitelist, blacklist, challenge
+delete      zone, record, listing
+change      zone, record
+clear       cache
+
+Examples:
+
+$ cloudflare show settings example.net
+advanced_ddos                  off
+always_online                  on
+automatic_https_rewrites       off
+...
+
+$ cloudflare show records example.net
+www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
+@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
+*       3600 A         198.51.100.2       ;  #IDSTRING
+...
+
+$ cloudflare show records example.net
+www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
+@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
+*       3600 A         198.51.100.2       ;  #IDSTRING
+...
+
+"
 	;;
 esac
 
