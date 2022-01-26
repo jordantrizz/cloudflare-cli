@@ -210,4 +210,6 @@ Usage: cloudflare check zone <zone>
 - curl
 - php (php-cli) 5.x
 
-
+# Code Stewardship
+* Originally created by @bAndie91
+* Taken over by @jordanttrizz on 01/26/2022
