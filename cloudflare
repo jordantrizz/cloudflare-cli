@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 
+# ---
+# cloudflare-cli v1.0.1
+# ---
+
+# - Variables
 debug=0
 details=0
 quiet=0
 NL=$'\n'
 TA=$'\t'
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
+
+# - Help text
 usage_text=\
 "Usage: cloudflare [Options] <command> <parameters>
 
@@ -30,41 +37,28 @@ Configuration file for credentials:
 
 Enter \"cloudflare help\" to list available commands."
 
+# -------------------------------------------------- #
 
-die()
-{
-	if [ -n "$1" ]
-	then
+# - die function, need to figure out what this is for.
+die() {
+	if [ -n "$1" ];	then
 		echo "$1" >&2
 	fi
 	exit ${2:-1}
 }
 
-if [ $BASH_VERSINFO -lt 4 ]
-then
+# - Check bash version and die if not at least 4.0
+if [ $BASH_VERSINFO -lt 4 ]; then
 	die "Sorry, you need at least bash 4.0 to run this script." 1
 fi
 
-is_debug()
-{
-	[ "$debug" = 1 ]
-}
-is_quiet()
-{
-	[ "$quiet" = 1 ]
-}
+# - Small funcs yay
+is_debug() { [ "$debug" = 1 ]; }
+is_quiet() { [ "$quiet" = 1 ]; }
+is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
+is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
-is_integer()
-{
-	expr "$1" : '[0-9]\+$' >/dev/null
-}
-
-is_hex()
-{
-	expr "$1" : '[0-9a-fA-F]\+$' >/dev/null
-}
-
-
+# - Main call, I think?
 call_cf_v4()
 {
 	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
@@ -675,7 +669,7 @@ add)
 				}"
 			;;
 		*)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":true}"
 			;;
 		esac
 		;;
