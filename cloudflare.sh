@@ -617,7 +617,7 @@ Additional Options
 		content=$1
 		ttl=$2
 		if [[ "$type" == "A" ]] || [[ "$type" == "CNAME" ]]; then
-			proxied=$3	
+			proxied=$3
 		elif [[ "$type" == "MX" ]] || [[ "$type" == "SRV" ]]; then
 			prio=$3
 		fi
