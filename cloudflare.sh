@@ -590,7 +590,7 @@ add)
 		[ $# -lt 4 ] && die \
 "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
 	<zone>      domain zone to register the record in, see 'show zones' command
-	<type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT, SPF, LOC
+	<type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes ""), SPF, LOC
 	<name>      subdomain name, or \"@\" to refer to the domain's root
 	<content>   IP address for A, AAAA
 		    FQDN for CNAME, MX, NS, SRV
