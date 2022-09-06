@@ -4,44 +4,93 @@
 # cloudflare-cli v1.0.1
 # ---
 
+# -------------------------------------------------- #
 # -- Variables
+# -------------------------------------------------- #
 VERSION=1.0.1
-debug=0
+DEBUG=0
 details=0
 quiet=0
 NL=$'\n'
 TA=$'\t'
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 
-# - Help text
-usage_text=\
+# - Usage
+USAGE=\
 "Usage: cloudflare [Options] <command> <parameters>
 
 Commands:
    show, add, delete, change, clear, invalidate, check
+   
+   show        zones, settings, records, listing
+   add         zone, record, whitelist, blacklist, challenge
+   delete      zone, record, listing
+   change      zone, record
+   clear       cache
+   help        examples
 
 Options:
- --details, -d    Display detailed info where possible
- --debug, -D      Display API debugging info
- --quiet, -q      Less verbose
- -E <email>
- -T <api_token>
+
+   --details, -d    Display detailed info where possible
+   --debug, -D      Display API debugging info
+   --quiet, -q      Less verbose
+   -E <email>
+   -T <api_token>
+
 Environment variables:
- CF_ACCOUNT  -  email address (as -E option)
- CF_TOKEN    -  API token (as -T option)
+	CF_ACCOUNT  -  email address (as -E option)
+	CF_TOKEN    -  API token (as -T option)
 
 Configuration file for credentials:
- Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
+	Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
 
- CF_ACCOUNT=example@example.com
- CF_TOKEN=<token>
+	CF_ACCOUNT=example@example.com
+	CF_TOKEN=<token>
 
-Version $version
+Version $VERSION
+
 Enter \"cloudflare help\" to list available commands."
 
+HELP=\
+"Help
+
+Commands:
+   show, add, delete, change, clear, invalidate, check
+
+show        zones, settings, records, listing
+add         zone, record, whitelist, blacklist, challenge
+delete      zone, record, listing
+change      zone, record
+clear       cache
+
+Examples:
+
+$ cloudflare show settings example.net
+advanced_ddos                  off
+always_online                  on
+automatic_https_rewrites       off
+...
+
+$ cloudflare show records example.net
+www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
+@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
+*       3600 A         198.51.100.2       ;  #IDSTRING
+...
+
+$ cloudflare show records example.net
+www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
+@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
+*       3600 A         198.51.100.2       ;  #IDSTRING
+...
+
+Version $VERSION
+"
+
+# -------------------------------------------------- #
+# -- Functions
 # -------------------------------------------------- #
 
-# - die function, need to figure out what this is for.
+# -- die function, need to figure out what this is for.
 die() {
 	if [ -n "$1" ];	then
 		echo "$1" >&2
@@ -49,13 +98,15 @@ die() {
 	exit ${2:-1}
 }
 
-# - Check bash version and die if not at least 4.0
-if [ $BASH_VERSINFO -lt 4 ]; then
-	die "Sorry, you need at least bash 4.0 to run this script." 1
-fi
+check_bash () {
+	# - Check bash version and die if not at least 4.0
+	if [ $BASH_VERSINFO -lt 4 ]; then
+		die "Sorry, you need at least bash 4.0 to run this script." 1
+	fi
+}
 
-# - Small funcs yay
-is_debug() { [ "$debug" = 1 ]; }
+# -- Small funcs yay
+is_debug() { [ "$DEBUG" = 1 ]; }
 is_quiet() { [ "$quiet" = 1 ]; }
 is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
@@ -255,7 +306,7 @@ json_decode()
 		}
 		
 		$data0 = json_decode(file_get_contents("php://stdin"), true);
-		if('$debug') file_put_contents("php://stderr", var_export($data0, 1));
+		if('$DEBUG') file_put_contents("php://stderr", var_export($data0, 1));
 		if(@$data0["result"] == "error")
 		{
 			echo $data0["msg"] . "\n";
@@ -475,13 +526,13 @@ do
 	-T)	shift
 		CF_TOKEN=$1;;
 	-D|--debug)
-		debug=1;;
+		DEBUG=1;;
 	-d|--detail|--detailed|--details)
 		details=1;;
 	-q|--quiet)
 		quiet=1;;
 	-h|--help)
-		die "$usage_text" 0
+		die "$USAGE" 0
 		;;
 	--)	shift
 		break;;
@@ -499,13 +550,13 @@ if [ ! -f "$HOME/.cloudflare" ]
 	then
 		die "No \$CF_ACCOUNT set.
 
-	$usage_text"
+	$USAGE"
 	fi
 	if [ -z "$CF_TOKEN" ]
 	then
 		die "No \$CF_TOKEN set.
 
-	$usage_text"
+	$USAGE"
 	fi
 else
 	if is_debug; then echo "Found .cloudflare file."; fi
@@ -516,19 +567,19 @@ else
         then
                 die "No \$CF_ACCOUNT set in config.
 
-        $usage_text"
+        $USAGE"
         fi
         if [ -z "$CF_TOKEN" ]
         then
                 die "No \$CF_TOKEN set in config.
 
-        $usage_text"
+        $USAGE"
         fi
 fi
 
 if [ -z "$1" ]
 then
-	die "$usage_text" 1
+	die "$USAGE" 1
 fi
 
 
@@ -1037,36 +1088,7 @@ json)
 	;;
 	
 *|help)
-	die "Commands:
-   show, add, delete, change, clear, invalidate, check
-
-show        zones, settings, records, listing
-add         zone, record, whitelist, blacklist, challenge
-delete      zone, record, listing
-change      zone, record
-clear       cache
-
-Examples:
-
-$ cloudflare show settings example.net
-advanced_ddos                  off
-always_online                  on
-automatic_https_rewrites       off
-...
-
-$ cloudflare show records example.net
-www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
-@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
-*       3600 A         198.51.100.2       ;  #IDSTRING
-...
-
-$ cloudflare show records example.net
-www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
-@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
-*       3600 A         198.51.100.2       ;  #IDSTRING
-...
-
-"
+	die; echo $HELP
 	;;
 esac
 
