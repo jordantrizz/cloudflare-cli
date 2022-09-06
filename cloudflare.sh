@@ -22,7 +22,7 @@ USAGE=\
 Commands:
    show, add, delete, change, clear, invalidate, check
    
-   show        zones, settings, records, listing
+   show        zone, zones, settings, records, listing
    add         zone, record, whitelist, blacklist, challenge
    delete      zone, record, listing
    change      zone, record
@@ -57,7 +57,7 @@ HELP=\
 Commands:
    show, add, delete, change, clear, invalidate, check
 
-show        zones, settings, records, listing
+show        zone, zones, settings, records, listing
 add         zone, record, whitelist, blacklist, challenge
 delete      zone, record, listing
 change      zone, record
@@ -85,12 +85,37 @@ www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
 
 Version $VERSION
 "
+HELP_ADD_RECORD=\
+"Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
+    <zone>      domain zone to register the record in, see 'show zones' command
+    <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes ""), SPF, LOC
+    <name>      subdomain name, or \"@\" to refer to the domain's root
+    <content>   IP address for A, AAAA
+            FQDN for CNAME, MX, NS, SRV
+                    any text for TXT, spf definition text for SPF
+                    coordinates for LOC (see RFC 1876 section 3)
+Additional Options
+    [ttl]       Time To Live, 1 = auto
+   MX records:
+    [prio]      required only by MX and SRV records, enter \"10\" if unsure
+   A or CNAME records:
+    [proxied]   Proxied, true or false. For A or CNAME records only.
+   SRV records:
+    [service]   service name, eg. \"sip\"
+    [protocol]  tcp, udp, tls
+    [weight]    relative weight for records with the same priority
+    [port]      layer-4 port number"
 
 # -------------------------------------------------- #
 # -- Functions
 # -------------------------------------------------- #
 
 # -- die function, need to figure out what this is for.
+# -------
+_error () {
+	echo " ** ERROR ** $1"
+	return $2
+}
 die() {
 	if [ -n "$1" ];	then
 		echo "$1" >&2
@@ -98,20 +123,24 @@ die() {
 	exit ${2:-1}
 }
 
+# -- check_bash - check version of bash
+# --------
 check_bash () {
 	# - Check bash version and die if not at least 4.0
 	if [ $BASH_VERSINFO -lt 4 ]; then
-		die "Sorry, you need at least bash 4.0 to run this script." 1
+		_error "Sorry, you need at least bash 4.0 to run this script." 1
 	fi
 }
 
-# -- Small funcs yay
+# -- is_* functions
+# --------
 is_debug() { [ "$DEBUG" = 1 ]; }
 is_quiet() { [ "$quiet" = 1 ]; }
 is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
-# - Main call, I think?
+# -- call_cf_v4 - Main call to cloudflare using curl
+# --------
 call_cf_v4()
 {
 	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
@@ -178,6 +207,9 @@ call_cf_v4()
 	return $exitcode
 }
 
+
+# -- json_decode - php code to decode json
+# --------
 json_decode()
 {
 	# Parameter Synatx
@@ -417,20 +449,24 @@ json_decode()
 	' "$@"
 }
 
+
+# -- findout_record
+#
+# Arguments:
+#   $1 - record name (eg: sub.example.com)
+#  $2 - record type, optional (eg: CNAME)
+#  $3 - 0/1, stop searching at first match, optional
+#  $4 - record content to match to
+#  writes global variables: zone, zone_id, record_id, record_type, record_ttl, record_content
+#
+# Return code:
+#  0 - zone and record are found and stored in zone, zone_id, record_id, record_type, record_ttl, record_content
+#  2 - no suitable zone found
+#  3 - no matching record found
+#  4 - more than 1 matching record found
+# --------
 findout_record()
 {
-	# arguments:
-	#   $1 - record name (eg: sub.example.com)
-	#   $2 - record type, optional (eg: CNAME)
-	#   $3 - 0/1, stop searching at first match, optional
-	#   $4 - record content to match to
-	# writes global variables: zone, zone_id, record_id, record_type, record_ttl, record_content
-	# return code:
-	#   0 - zone and record are found and stored in zone, zone_id, record_id, record_type, record_ttl, record_content
-	#   2 - no suitable zone found
-	#   3 - no matching record found
-	#   4 - more than 1 matching record found
-	
 	local record_name=${1,,}
 	declare -g record_type=${2^^}
 	local first_match=$3
@@ -506,12 +542,15 @@ findout_record()
 	return 0
 }
 
+# ---------------------------------------
+# -- get_zone_id - get Cloudflare zone id
+# ----------------------------------------
 get_zone_id()
 {
 	zone_id=`call_cf_v4 GET /zones name="$1" -- .result ,id`
 	if [ -z "$zone_id" ]
 	then
-		die "No such DNS zone found"
+		_error "No such DNS zone found"
 	fi
 }
 
@@ -532,7 +571,7 @@ do
 	-q|--quiet)
 		quiet=1;;
 	-h|--help)
-		die "$USAGE" 0
+		_error "$USAGE" 0
 		;;
 	--)	shift
 		break;;
@@ -548,13 +587,13 @@ if [ ! -f "$HOME/.cloudflare" ]
 		echo "No .cloudflare file."
 	if [ -z "$CF_ACCOUNT" ]
 	then
-		die "No \$CF_ACCOUNT set.
+		_error "No \$CF_ACCOUNT set.
 
 	$USAGE"
 	fi
 	if [ -z "$CF_TOKEN" ]
 	then
-		die "No \$CF_TOKEN set.
+		_error "No \$CF_TOKEN set.
 
 	$USAGE"
 	fi
@@ -565,13 +604,13 @@ else
 	
         if [ -z "$CF_ACCOUNT" ]
         then
-                die "No \$CF_ACCOUNT set in config.
+                _error "No \$CF_ACCOUNT set in config.
 
         $USAGE"
         fi
         if [ -z "$CF_TOKEN" ]
         then
-                die "No \$CF_TOKEN set in config.
+                _error "No \$CF_TOKEN set in config.
 
         $USAGE"
         fi
@@ -579,7 +618,7 @@ fi
 
 if [ -z "$1" ]
 then
-	die "$USAGE" 1
+	_error "$USAGE" 1
 fi
 
 
@@ -589,6 +628,10 @@ cmd1=$1
 shift
 
 case "$cmd1" in
+
+# --------------------
+# -- list|show command
+# --------------------
 list|show)
 	cmd2=$1
 	shift
@@ -597,7 +640,7 @@ list|show)
 		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
 	setting|settings)
-		[ -z "$1" ] && die "Usage: cloudflare $cmd1 settings <zone>"
+		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 settings <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -613,7 +656,7 @@ list|show)
 		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 	record|records)
-		[ -z "$1" ] && die "Usage: cloudflare $cmd1 records <zone>"
+		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 records <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -627,18 +670,20 @@ list|show)
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	*)
-		die "Parameters:
+		_error "Parameters:
    zones, settings, records, listing"
 		;;
 	esac
 	;;
-	
+# --------------
+# -- add command
+# --------------	
 add)
 	cmd2=$1
 	shift
 	case "$cmd2" in
 	record)
-		[ $# -lt 4 ] && die \
+		[ $# -lt 4 ] && _error \
 "Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
 	<zone>      domain zone to register the record in, see 'show zones' command
 	<type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes ""), SPF, LOC
@@ -680,7 +725,7 @@ Additional Options
 		[ -n "$proxied" ] || proxied=true
 		[ -n "$ttl" ] || ttl=1
 		[ -n "$prio" ] || prio=10
-		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then die "Can't proxy 127.0.0.0/8 using an A record"; fi
+		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		get_zone_id "$zone"
 		
 		
@@ -786,6 +831,9 @@ Additional Options
 	esac
 	;;
 	
+# -----------------
+# -- delete command
+# -----------------
 delete)
 	cmd2=$1
 	shift
@@ -867,6 +915,9 @@ delete)
 	esac
 	;;
 	
+# ---------------------
+# -- change|set command
+# ---------------------
 change|set)
 	cmd2=$1
 	shift
@@ -1011,7 +1062,9 @@ Settings:
    zone, record"
 	esac
 	;;
-	
+# ----------------
+# -- clear command
+# ----------------	
 clear)
 	case "$1" in
 	cache)
@@ -1026,7 +1079,10 @@ clear)
 		;;
 	esac
 	;;
-	
+
+# ----------------
+# -- check command
+# ----------------	
 check)
 	case "$1" in
 	zone)
@@ -1042,6 +1098,9 @@ check)
 	esac
 	;;
 
+# ---------------------
+# -- invalidate command
+# ---------------------
 invalidate)
 	if [ -n "$1" ]
 	then
@@ -1083,10 +1142,16 @@ invalidate)
 	fi
 	;;
 	
+# ---------------
+# -- json command
+# ---------------
 json)
 	json_decode "$@"
 	;;
-	
+
+# ---------------
+# -- help command
+# ---------------	
 *|help)
 	die; echo $HELP
 	;;
