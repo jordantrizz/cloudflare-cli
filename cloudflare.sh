@@ -22,12 +22,13 @@ USAGE=\
 Commands:
    show, add, delete, change, clear, invalidate, check
    
-   show        zone, zones, settings, records, listing
-   add         zone, record, whitelist, blacklist, challenge
-   delete      zone, record, listing
-   change      zone, record
-   clear       cache
-   help        examples
+   show           zone, zones, settings, records, listing
+   add            zone, record, whitelist, blacklist, challenge
+   delete         zone, record, listing
+   change         zone, record
+   clear          cache
+   invalidate     invalidate URL's
+   help           examples
 
 Options:
 
@@ -106,16 +107,31 @@ Additional Options
     [weight]    relative weight for records with the same priority
     [port]      layer-4 port number"
 
+
 # -------------------------------------------------- #
 # -- Functions
 # -------------------------------------------------- #
 
-# -- die function, need to figure out what this is for.
-# -------
+# -- help
+HELP () {
+cmd1=$1
+shift
+	case "$cmd1" in
+	# -- usage
+	usage|USAGE)
+	echo "$USAGE";exit;;
+	# -- help
+	help|HELP)
+	echo "$HELP";exit;;
+esac
+}
+
+# -- _error
 _error () {
 	echo " ** ERROR ** $1"
 	return $2
 }
+# -- die
 die() {
 	if [ -n "$1" ];	then
 		echo "$1" >&2
@@ -124,7 +140,6 @@ die() {
 }
 
 # -- check_bash - check version of bash
-# --------
 check_bash () {
 	# - Check bash version and die if not at least 4.0
 	if [ $BASH_VERSINFO -lt 4 ]; then
@@ -133,14 +148,12 @@ check_bash () {
 }
 
 # -- is_* functions
-# --------
 is_debug() { [ "$DEBUG" = 1 ]; }
 is_quiet() { [ "$quiet" = 1 ]; }
 is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
 # -- call_cf_v4 - Main call to cloudflare using curl
-# --------
 call_cf_v4()
 {
 	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
@@ -207,9 +220,7 @@ call_cf_v4()
 	return $exitcode
 }
 
-
 # -- json_decode - php code to decode json
-# --------
 json_decode()
 {
 	# Parameter Synatx
@@ -449,7 +460,6 @@ json_decode()
 	' "$@"
 }
 
-
 # -- findout_record
 #
 # Arguments:
@@ -464,7 +474,6 @@ json_decode()
 #  2 - no suitable zone found
 #  3 - no matching record found
 #  4 - more than 1 matching record found
-# --------
 findout_record()
 {
 	local record_name=${1,,}
@@ -542,9 +551,7 @@ findout_record()
 	return 0
 }
 
-# ---------------------------------------
 # -- get_zone_id - get Cloudflare zone id
-# ----------------------------------------
 get_zone_id()
 {
 	zone_id=`call_cf_v4 GET /zones name="$1" -- .result ,id`
@@ -554,9 +561,11 @@ get_zone_id()
 	fi
 }
 
+# ------------
+# -- Main loop
+# ------------
 
-
-
+# -- check for options
 while [ -n "$1" ]
 do
 	case "$1" in
@@ -581,6 +590,7 @@ do
 	shift
 done
 
+# -- check for .cloudflare credentials
 
 if [ ! -f "$HOME/.cloudflare" ]
 	then
@@ -616,19 +626,18 @@ else
         fi
 fi
 
+# -- check if anything set on command line
 if [ -z "$1" ]
 then
-	_error "$USAGE" 1
+	HELP USAGE
 fi
 
 
-
-
+# -- run commands
 cmd1=$1
 shift
 
 case "$cmd1" in
-
 # --------------------
 # -- list|show command
 # --------------------
@@ -1067,7 +1076,7 @@ Settings:
 # ----------------	
 clear)
 	case "$1" in
-	cache)
+	all-cache)
 		shift
 		[ -z "$1" ] && die "Usage: cloudflare clear cache <zone>"
 		get_zone_id "$1"
@@ -1153,7 +1162,7 @@ json)
 # -- help command
 # ---------------	
 *|help)
-	die; echo $HELP
+	echo "$HELP"
 	;;
 esac
 
