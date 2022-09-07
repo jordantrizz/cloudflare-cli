@@ -15,6 +15,15 @@ NL=$'\n'
 TA=$'\t'
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 
+# -- Colors
+RED="\e[31m"
+GREEN="\e[32m"
+BLUEBG="\e[44m"
+YELLOWBG="\e[43m"
+GREENBG="\e[42m"
+DARKGREYBG="\e[100m"
+ECOL="\e[0m"
+
 # -- HELP
 HELP=\
 "
@@ -59,7 +68,7 @@ Commands:
    				everything
       			invalidate <url>
 
-   help       - Command examples
+   help       - Full help
 
 Environment variables:
 	CF_ACCOUNT  -  email address (as -E option)
@@ -70,6 +79,8 @@ Configuration file for credentials:
 
 	CF_ACCOUNT=example@example.com
 	CF_TOKEN=<token>
+
+${HELP_EXAMPLES}
 
 Version $VERSION
 
@@ -87,12 +98,17 @@ change      zone, record
 clear       cache"
 
 # -- USAGE
-USAGE=\
+HELP_USAGE=\
 "Usage: cloudflare [Options] <command> <parameters>
 
 ${HELP_CMDS}
 
-Examples:
+${HELP_EXAMPLES}
+"
+
+# -- EXAMPLES
+HELP_EXAMPLES=\
+"Examples:
 
 $ cloudflare show settings example.net
 advanced_ddos                  off
@@ -112,8 +128,25 @@ www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
 *       3600 A         198.51.100.2       ;  #IDSTRING
 ...
 
-Version $VERSION
-"
+Version $VERSION"
+
+HELP_SHOW=\
+"${HELP_CMDS}
+
+Usage: cloudflare list [zones|zone <zone>|settings <zone>|records <zone>|access-lists <zone>]
+
+	Commands:
+		zones			-List all zones under account.
+	    zone 			-List basic information for <zone>.
+	    settings 		-List settings for <zone>
+	    records			-List records for <zone>
+	    access-lists	-List access lists for <zone>
+
+	Options:
+	<zone> domain zone to register the record in, see 'show zones' command
+
+Version $VERSION"
+
 
 HELP_ADD_RECORD=\
 "${HELP_CMDS}
@@ -163,20 +196,49 @@ shift
 			cmd2="$2"
 			case "$cmd2" in	
 				record)
-				echo "$HELP_ADD_RECORD";;
+				echo "$HELP_ADD_RECORD"
+				;;
 			esac		
 		;;
+		show)
+			echo "$HELP_SHOW"
+			;;			
 esac
 }
 
-# -- _error
+# ----------------------
+# -- Messaging Functions
+# ----------------------
 _error () {
-	echo " ** ERROR ** $1"
+    echo -e "${RED}** ERROR ** - $1 ${ECOL}"
 }
+
+_success () {
+    echo -e "${GREEN}** SUCCESS ** - $@ ${ECOL}"
+}
+
+_running () {
+    echo -e "${BLUEBG}${@}${ECOL}"
+}
+
+_creating () {
+    echo -e "${DARKGREYBG}${@}${ECOL}"
+}
+
+_separator () {
+    echo -e "${YELLOWBG}****************${ECOL}"
+}
+
+_debug () {
+    if [ -f $SCRIPT_DIR/.debug ]; then
+        echo "DEBUG: $@"
+    fi
+}
+
 # -- die
 _die() {
 	if [ -n "$1" ];	then
-		echo "$1" >&2
+		_error "$1"
 	fi
 	exit ${2:-1}
 }
@@ -185,8 +247,7 @@ _die() {
 check_bash () {
 	# - Check bash version and die if not at least 4.0
 	if [ $BASH_VERSINFO -lt 4 ]; then
-		_error "Sorry, you need at least bash 4.0 to run this script." 1
-		_die
+		_die "Sorry, you need at least bash 4.0 to run this script." 1
 	fi
 }
 
@@ -197,8 +258,7 @@ is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
 # -- call_cf_v4 - Main call to cloudflare using curl
-call_cf_v4()
-{
+call_cf_v4() {
 	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
 	local method path formtype exitcode querystring page per_page
 	declare -a curl_opts
@@ -517,8 +577,7 @@ json_decode()
 #  2 - no suitable zone found
 #  3 - no matching record found
 #  4 - more than 1 matching record found
-findout_record()
-{
+findout_record() {
 	local record_name=${1,,}
 	declare -g record_type=${2^^}
 	local first_match=$3
@@ -609,7 +668,7 @@ get_zone_id()
 # -- Main loop
 # ------------
 
-# -- check for options
+# -- Check for options
 while [ -n "$1" ]
 do
 	case "$1" in
@@ -635,7 +694,7 @@ do
 	shift
 done
 
-# -- check for .cloudflare credentials
+# -- Check for .cloudflare credentials
 
 if [ ! -f "$HOME/.cloudflare" ]
 	then
@@ -671,34 +730,32 @@ else
         fi
 fi
 
-# -- check if anything set on command line
-if [ -z "$1" ]
-then
-	_error "Missing arguments"
+# -- Check for command
+if [ -z "$1" ]; then
 	HELP usage
-	_die
+	_die "Missing arguments" 1
 fi
 
 
 # -- run commands
-cmd1=$1
+CMD1=$1
 shift
 
-case "$cmd1" in
+case "$CMD1" in
 # --------------------
 # -- list|show command
 # --------------------
 list|show)
-	cmd2=$1
+	CMD2=$1
 	shift
-	case "$cmd2" in
+	case "$CMD2" in
 	# -- zone
 	zone|zones)
 		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
 	# -- settings
 	setting|settings)
-		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 settings <zone>"
+		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 settings <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -715,7 +772,7 @@ list|show)
 		;;
 	# -- record
 	record|records)
-		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 records <zone>"
+		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -730,8 +787,12 @@ list|show)
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	*)
-		_error "No command $2" 1
-		HELP usage
+		HELP show
+		if [[ -n $CMD2 ]]; then
+			_die "Unknown command $CMD2" 1
+		else
+			_die "No command provided" 1
+		fi
 		;;
 	esac
 	;;
@@ -739,9 +800,9 @@ list|show)
 # -- add command
 # --------------	
 add)
-	cmd2=$1
+	CMD2=$1
 	shift
-	case "$cmd2" in
+	case "$CMD2" in
 	record)
 		[ $# -lt 4 ] && _error "Missing arguments"; HELP add record;
 		
@@ -837,7 +898,7 @@ add)
 		trg_type=''
 		shift
 		notes=$*
-		case "$cmd2" in
+		case "$CMD2" in
 		  whitelist)	mode=whitelist;;
 		  blacklist|block)	mode=block;;
 		  challenge)	mode=challenge;;
@@ -876,9 +937,9 @@ add)
 # -- delete command
 # -----------------
 delete)
-	cmd2=$1
+	CMD2=$1
 	shift
-	case "$cmd2" in
+	case "$CMD2" in
 	record)
 		prm1=$1
 		prm2=$2
@@ -960,11 +1021,11 @@ delete)
 # -- change|set command
 # ---------------------
 change|set)
-	cmd2=$1
+	CMD2=$1
 	shift
-	case "$cmd2" in
+	case "$CMD2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare $cmd1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
+		[ -z "$1" ] && die "Usage: cloudflare $CMD1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
 		[ -z "$2" ] && die "Settings:
    security_level [under_attack | high | medium | low | essentially_off]
    cache_level [aggressive | basic | simplified]
@@ -1003,7 +1064,7 @@ Other: see output of 'show zone' command"
 				do
 					case "$s" in
 					css|html|js) eval $s=on;;
-					*) die "E.g: cloudflare $cmd1 zone <zone> minify css,html,js"
+					*) die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
 					esac
 				done
 				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
@@ -1021,7 +1082,7 @@ Other: see output of 'show zone' command"
 		;;
 		
 	record)
-		str1="Usage: cloudflare $cmd1 record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
+		str1="Usage: cloudflare $CMD1 record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
 You must enter \"type\" and the record type (A, MX, ...) when the record name is ambiguous, 
 or enter \"first\" to modify the first matching record in the zone,
 or enter \"oldcontent\" and the exact content of the record you want to modify if there are more records with the same name and type.
@@ -1193,9 +1254,11 @@ json)
 # ---------------
 # -- help command
 # ---------------	
-*|help)
+help)
 	HELP usage
-	_die
+	;;
+*)
+	_die "No Command provided." 1
 	;;
 esac
 
