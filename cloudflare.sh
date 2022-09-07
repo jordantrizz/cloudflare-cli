@@ -15,20 +15,12 @@ NL=$'\n'
 TA=$'\t'
 APIv4_ENDPOINT=https://api.cloudflare.com/client/v4
 
-# - Usage
-USAGE=\
-"Usage: cloudflare [Options] <command> <parameters>
+# -- HELP
+HELP=\
+"
+Help
 
-Commands:
-   show, add, delete, change, clear, invalidate, check
-   
-   show           zone, zones, settings, records, listing
-   add            zone, record, whitelist, blacklist, challenge
-   delete         zone, record, listing
-   change         zone, record
-   clear          cache
-   invalidate     invalidate URL's
-   help           examples
+Usage: cloudflare [Options] <command> <parameters>
 
 Options:
 
@@ -37,6 +29,37 @@ Options:
    --quiet, -q      Less verbose
    -E <email>
    -T <api_token>
+
+Commands:
+ 
+   show       - Show information about an object
+                zone <zone>
+                zones
+                settings <zone>
+                records <zone>
+                access-lists <zone>
+
+   add        - Create Object
+                zone 
+                record
+                whitelist
+                blacklist
+                challenge
+
+   delete     - Delete Objects    
+                zone
+                record
+                listing
+
+   change     - Change Object  
+                zone
+                record
+
+   clear      - Clear cache  
+   				everything
+      			invalidate <url>
+
+   help       - Command examples
 
 Environment variables:
 	CF_ACCOUNT  -  email address (as -E option)
@@ -52,17 +75,22 @@ Version $VERSION
 
 Enter \"cloudflare help\" to list available commands."
 
-HELP=\
-"Help
-
-Commands:
+# -- HELP_CMDS
+HELP_CMDS=\
+"Commands:
    show, add, delete, change, clear, invalidate, check
 
 show        zone, zones, settings, records, listing
 add         zone, record, whitelist, blacklist, challenge
 delete      zone, record, listing
 change      zone, record
-clear       cache
+clear       cache"
+
+# -- USAGE
+USAGE=\
+"Usage: cloudflare [Options] <command> <parameters>
+
+${HELP_CMDS}
 
 Examples:
 
@@ -86,8 +114,11 @@ www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
 
 Version $VERSION
 "
+
 HELP_ADD_RECORD=\
-"Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
+"${HELP_CMDS}
+
+Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
     <zone>      domain zone to register the record in, see 'show zones' command
     <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes ""), SPF, LOC
     <name>      subdomain name, or \"@\" to refer to the domain's root
@@ -117,22 +148,33 @@ HELP () {
 cmd1=$1
 shift
 	case "$cmd1" in
-	# -- usage
-	usage|USAGE)
-	echo "$USAGE";exit;;
-	# -- help
-	help|HELP)
-	echo "$HELP";exit;;
+		# -- usage
+		usage|USAGE)
+		echo "$USAGE"
+		;;
+
+		# -- help
+		help|HELP)
+		echo "$HELP"
+		;;
+
+		# -- add
+		add)
+			cmd2="$2"
+			case "$cmd2" in	
+				record)
+				echo "$HELP_ADD_RECORD";;
+			esac		
+		;;
 esac
 }
 
 # -- _error
 _error () {
 	echo " ** ERROR ** $1"
-	return $2
 }
 # -- die
-die() {
+_die() {
 	if [ -n "$1" ];	then
 		echo "$1" >&2
 	fi
@@ -144,6 +186,7 @@ check_bash () {
 	# - Check bash version and die if not at least 4.0
 	if [ $BASH_VERSINFO -lt 4 ]; then
 		_error "Sorry, you need at least bash 4.0 to run this script." 1
+		_die
 	fi
 }
 
@@ -558,6 +601,7 @@ get_zone_id()
 	if [ -z "$zone_id" ]
 	then
 		_error "No such DNS zone found"
+		_die
 	fi
 }
 
@@ -581,6 +625,7 @@ do
 		quiet=1;;
 	-h|--help)
 		_error "$USAGE" 0
+		_die
 		;;
 	--)	shift
 		break;;
@@ -597,15 +642,15 @@ if [ ! -f "$HOME/.cloudflare" ]
 		echo "No .cloudflare file."
 	if [ -z "$CF_ACCOUNT" ]
 	then
-		_error "No \$CF_ACCOUNT set.
-
-	$USAGE"
+		_error "No \$CF_ACCOUNT set."
+		HELP usage
+		_die
 	fi
 	if [ -z "$CF_TOKEN" ]
 	then
-		_error "No \$CF_TOKEN set.
-
-	$USAGE"
+		_error "No \$CF_TOKEN set."
+		HELP usage
+		_die		
 	fi
 else
 	if is_debug; then echo "Found .cloudflare file."; fi
@@ -614,9 +659,9 @@ else
 	
         if [ -z "$CF_ACCOUNT" ]
         then
-                _error "No \$CF_ACCOUNT set in config.
-
-        $USAGE"
+                _error "No \$CF_ACCOUNT set in config."
+                HELP usage                
+				_die
         fi
         if [ -z "$CF_TOKEN" ]
         then
@@ -629,7 +674,9 @@ fi
 # -- check if anything set on command line
 if [ -z "$1" ]
 then
-	HELP USAGE
+	_error "Missing arguments"
+	HELP usage
+	_die
 fi
 
 
@@ -645,9 +692,11 @@ list|show)
 	cmd2=$1
 	shift
 	case "$cmd2" in
+	# -- zone
 	zone|zones)
 		call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
 		;;
+	# -- settings
 	setting|settings)
 		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 settings <zone>"
 		if is_hex "$1"
@@ -664,6 +713,7 @@ list|show)
 		fi
 		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
+	# -- record
 	record|records)
 		[ -z "$1" ] && _error "Usage: cloudflare $cmd1 records <zone>"
 		if is_hex "$1"
@@ -675,12 +725,13 @@ list|show)
 		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
 			',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		;;
-	listing|listings|blocking|blockings)
+	# -- access-rules
+	access-rules|listing|listings|blocking|blockings)
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	*)
-		_error "Parameters:
-   zones, settings, records, listing"
+		_error "No command $2" 1
+		HELP usage
 		;;
 	esac
 	;;
@@ -692,26 +743,7 @@ add)
 	shift
 	case "$cmd2" in
 	record)
-		[ $# -lt 4 ] && _error \
-"Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
-	<zone>      domain zone to register the record in, see 'show zones' command
-	<type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes ""), SPF, LOC
-	<name>      subdomain name, or \"@\" to refer to the domain's root
-	<content>   IP address for A, AAAA
-		    FQDN for CNAME, MX, NS, SRV
-                    any text for TXT, spf definition text for SPF
-                    coordinates for LOC (see RFC 1876 section 3)
-Additional Options
-   	[ttl]       Time To Live, 1 = auto
-   MX records:
-   	[prio]      required only by MX and SRV records, enter \"10\" if unsure
-   A or CNAME records:
-	[proxied]   Proxied, true or false. For A or CNAME records only.
-   SRV records:
-	[service]   service name, eg. \"sip\"
-	[protocol]  tcp, udp, tls
-	[weight]    relative weight for records with the same priority
-	[port]      layer-4 port number"
+		[ $# -lt 4 ] && _error "Missing arguments"; HELP add record;
 		
 		zone=$1
 		shift
@@ -1162,7 +1194,8 @@ json)
 # -- help command
 # ---------------	
 *|help)
-	echo "$HELP"
+	HELP usage
+	_die
 	;;
 esac
 
