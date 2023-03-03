@@ -27,7 +27,11 @@ fi
 echo -n "Getting external IP ... " >&2
 # put your script here to obtain your external ip:
 # see github.com/bAndie91/extip
-currentip=`extip -q`
+if [ ! `which extip` ]; then
+	currentip=`curl icanhazip.com`
+else
+	currentip=`extip -q`
+fi
 echo "$currentip" >&2
 
 if [ -z "$currentip" ]
