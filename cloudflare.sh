@@ -23,6 +23,7 @@ CYAN="\e[36m"
 BLUEBG="\e[44m"
 YELLOWBG="\e[43m"
 DARKGREYBG="\e[100m"
+DARKGRAYFG="\e[90m"
 ECOL="\e[0m"
 
 # ===============================================
@@ -36,11 +37,12 @@ HELP_VERSION="Version: $VERSION"
 # -----------------------------------------------
 HELP_OPTIONS="Options:
 ---------
-   --details, -d    Display detailed info where possible
-   --debug, -D      Display API debugging info
-   --quiet, -q      Less verbose
-   -E <email>
-   -T <api_token>"
+   --details, -d       Display detailed info where possible
+   --debug, -D         Display API debugging info
+   --debug-curl, -DC   Display API debugging info and curl output
+   --quiet, -q         Less verbose
+   -E <email>          Cloudflare Email
+   -T <api_token>      Cloudflare API Token"
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -85,6 +87,10 @@ Commands:
     json        - Test json_decode function
                 PIPE| json <format>
 
+    pass        - Pass through queries to CF API
+                <method> <url> [parameters]
+                Example: cloudflare pass GET /zones
+
     help        - Full help
 
 	examples - Show Examples
@@ -117,6 +123,7 @@ HELP_CMDS="Commands:
     clear       cache
     check
     json
+	pass
     help
     examples"
 
@@ -178,6 +185,7 @@ Usage: cloudflare show [zones|zone <zone>|settings <zone>|records <zone>|access-
         settings         -List settings for <zone>
         records          -List records for <zone>
         access-lists     -List access lists for <zone>
+		email-routing    -List email routing for <zone>
 
     Options:
         <zone> domain zone to register the record in, see 'show zones' command
@@ -212,7 +220,8 @@ Options
     [weight]    relative weight for records with the same priority
     [port]      layer-4 port number
 
-${HELP_VERSION}"
+${HELP_VERSION}
+"
 
 # -----------------------------------------------
 # -- HELP_CLEAR
@@ -229,7 +238,8 @@ Usage: cloudflare clear cache <zone>
 	--------
 		<zone> domain zone to clear cache for, see 'show zones' command		
 
-${HELP_VERSION}"
+${HELP_VERSION}
+"
 
 # -----------------------------------------------
 # -- HELP_CHANGE
@@ -270,6 +280,57 @@ Usage: cloudflare change
 ${HELP_VERSION}
 "
 
+# -----------------------------------------------
+# -- help
+# -----------------------------------------------
+function help () {
+cmd1=$1
+shift
+	case "$cmd1" in
+		# -- usage
+		usage|USAGE)
+		echo "$HELP_USAGE"
+		;;
+		# -- help
+		help|HELP|full)
+		echo "$HELP_FULL"
+		;;
+
+		# -- add
+		add)
+			cmd2="$1"					
+			case "$cmd2" in
+				record)
+				
+				echo "$HELP_ADD_RECORD"
+				;;
+				*)
+				echo "$HELP_CMDS"
+			esac
+		;;
+		clear)
+			cmd2="$1"
+			case "$cmd2" in
+				cache)
+				echo "$HELP_CLEAR"
+				;;
+				*)
+				echo "$HELP_CLEAR"
+				;;
+			esac
+		;;
+		show)
+			echo "$HELP_SHOW"
+		;;
+		change)
+			echo "$HELP_CHANGE"
+		;;
+		*)
+		echo "$HELP_USAGE"
+		;;
+esac
+}
+
 # =================================================================================================
 # -- Functions
 # =================================================================================================
@@ -277,8 +338,7 @@ ${HELP_VERSION}
 # -----------------------------------------------
 # -- json_decode - php code to decode json
 # -----------------------------------------------
-json_decode()
-{
+function json_decode () {
 	# Parameter Synatx
 	#
 	# .key1.key11.key111
@@ -527,69 +587,24 @@ json_decode()
 # TODO - Add jq_decode function that utilizes jq versus PHP
 
 # -----------------------------------------------
-# -- cf-help
-# -----------------------------------------------
-function cf-help () {
-cmd1=$1
-shift
-	case "$cmd1" in
-		# -- usage
-		usage|USAGE)
-		echo "$HELP_USAGE"
-		;;
-
-		# -- help
-		help|HELP)
-		echo "$HELP_FULL"
-		;;
-
-		# -- add
-		add)
-			cmd2="$2"
-			case "$cmd2" in
-				record)
-				echo "$HELP_ADD_RECORD"
-				;;
-			esac
-		;;
-		clear)
-			cmd2="$2"
-			case "$cmd2" in
-				cache)
-				echo "$HELP_CLEAR"
-				;;
-				*)
-				echo "$HELP_CLEAR"
-				;;
-			esac
-		;;
-		show)
-			echo "$HELP_SHOW"
-		;;
-		change)
-			echo "$HELP_CHANGE"
-		;;
-		*)
-		echo "$HELP_USAGE"
-		;;
-esac
-}
-
-# -----------------------------------------------
 # -- Messaging Functions
 # -----------------------------------------------
 _error () { echo -e "${RED}** ERROR ** - $1 ${ECOL}"; }
 _success () { echo -e "${GREEN}** SUCCESS ** - ${*} ${ECOL}"; }
 _running () { echo -e "${BLUEBG}${*}${ECOL}"; }
+_running2 () { echo -e "${DARKGRAYFG}${*}${ECOL}"; }
 _creating () {  echo -e "${DARKGREYBG}${*}${ECOL}"; }
 _separator () {  echo -e "${YELLOWBG}****************${ECOL}"; }
 
 # -----------------------------------------------
-# -- debug
+# -- debug - ( $MESSAGE, $LEVEL)
 # -----------------------------------------------
-_debug () {
+function _debug () {
 	local DEBUG_MSG
 	if [ "$DEBUG" = "1" ]; then
+		if [[ $DEBUG_CURL_OUTPUT = "1" ]]; then
+			DEBUG_MSG+="CURL_OUTPUT: $CURL_OUTPUT_GLOBAL"
+		fi
 		for arg in "$@"; do
 			if [[ "$(declare -p "$arg" 2>/dev/null)" =~ "declare -a" ]]; then
 				DEBUG_MSG+="Array contents:"
@@ -605,9 +620,16 @@ _debug () {
 }
 
 # -----------------------------------------------
-# -- die
+# -- debug_all
 # -----------------------------------------------
-_die() {
+function _debug_all () {
+	_debug "DEBUG_ALL: ${*}"
+}
+
+# -----------------------------------------------
+# -- _die
+# -----------------------------------------------
+function _die () {
 	if [ -n "$1" ];	then
 		_error "$1"
 	fi
@@ -618,7 +640,7 @@ _die() {
 # -- check_bash - check version of bash
 # -----------------------------------------------
 function check_bash () {
-	# - Check bash version and die if not at least 4.0
+	# - Check bash version and _die if not at least 4.0
 	if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 		_die "Sorry, you need at least bash 4.0 to run this script." 1
 	fi
@@ -637,46 +659,53 @@ is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 # ===============================================
 # -- call_cf_v4 - Main call to cloudflare using curl
 # --
-# -- Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+# -- Invocation: call_cf_v4 <METHOD> <URL_PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
 # --
 # -- Example: call_cf_v4 GET /zones name="$zone" -- .result ,id
 # ===============================================
 function call_cf_v4 () {
-	local path formtype querystring page=1 per_page=50
-	local CURL_EXIT_CODE CURL_OUTPUT CURL_METHOD
+	_debug_all "call_cf_v4: ${*} EOF"
+	local METHOD="${1^^}"
+	shift	
+	local URL_PATH="$1"
+	shift
+
+	local FORMTYPE
+	local QUERY_STRING
+	local RESULT_PAGE=1 RESULTS_PER_PAGE=50
+	local CURL_EXIT_CODE CURL_OUTPUT 
 	declare -a CURL_OPTS
-	CURL_OPTS=()
+	CURL_OPTS=()	
 
-	# -- what are we doing
-	_debug "Running: call_cf_v4 $*"
+	# -- Ensure we got all variables
+	_debug "func call_cf-v4 variables: METHOD:$METHOD URL_PATH:$URL_PATH Remaing ARGS:${*}"
 
-	# -- CURL_METHOD
-	CURL_METHOD=${1^^}
-	shift
-
-	if [ "$CURL_METHOD" != POST -o "${1:0:1}" = '{' ]; then
+	# -- Check if PARAMETERS is a JSON string
+	if [ "$METHOD" != POST -o "${1:0:1}" = '{' ]; then
+		_debug "Detected JSON / GET - Setting Content-Type to application/json and FORMTYPE to data"
 		CURL_OPTS+=(-H "Content-Type: application/json")
-		formtype=data
+		FORMTYPE=data
 	else
-		formtype=form
+		_debug "Setting FORMTYPE to form"
+		CURL_OPTS+=(-H "Content-Type: multipart/form-data")
+		FORMTYPE=form
 	fi
 
-	if [ "$CURL_METHOD" = GET ];	then
-		CURL_OPTS+=(--get)
-	fi
+	# -- set method to --get if GET
+    if [ "$METHOD" = GET ]
+    then
+        CURL_OPTS+=(--get)
+    fi
 
-	# -- path
-	path=$1
-	shift
 
-	# -- parameters
+	# -- Process parameters
 	while [ -n "$1" ]; do
 		if [ ."$1" = .-- ]; then
 			shift
 			_debug "Parameters: ${*}"
 			break
 		else
-			CURL_OPTS+=(--"$formtype" "$1")
+			CURL_OPTS+=(--"$FORMTYPE" $1)
 		fi
 		shift
 	done
@@ -688,39 +717,40 @@ function call_cf_v4 () {
 
 	# -- Testing check
 	if [[ $TEST == "true" ]]; then
-		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $CURL_METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$path"
+		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
 		CURL_OUTPUT_GLOBAL='{"success": true,"message": "Operation completed successfully"}'
 		return "$CURL_EXIT_CODE"
 	else
 		# -- Go through pages of results
 		while true; do
 			# Set starting page and per page options
-			querystring="?page=$page&per_page=$per_page"
+			QUERY_STRING="?page=$RESULT_PAGE&per_page=$RESULTS_PER_PAGE"
 
 			# Run curl command
-			_debug "CMD: curl -X $CURL_METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$path$querystring"
+			_debug "CMD: curl -X $METHOD ${CURL_OPTS[*]} ${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}"
 			CURL_OUTPUT="$(curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
-				-X "$CURL_METHOD" "${CURL_OPTS[@]}" "$APIv4_ENDPOINT$path$querystring")"
-			_debug "CURL_OUTPUT: $CURL_OUTPUT"
-			CURL_EXIT_CODE="$?"
+				-X "$METHOD" "${CURL_OPTS[@]}" "${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}")"
+			CURL_EXIT_CODE=$?
+			_debug "CURL_OUTPUT: $CURL_OUTPUT" 2
 			_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
 
 			# -- Check if curl failed
-			if [[ $CURL_EXIT_CODE != 0 ]]; then
-				_error "curl failed with exit code $CURL_EXIT_CODE"
-				echo "$CURL_OUTPUT"
-				return $CURL_EXIT_CODE
+			if [[ $CURL_EXIT_CODE -gt 0 ]]; then				
+				_error "curl failed - OUTPUT: $CURL_OUTPUT EXITCODE: $CURL_EXIT_CODE"
+				echo "$CURL_OUTPUT"				
+				exit 1
 			fi
 
 			# -- Check if Cloudflare returned an error
 			if [[ $(grep '^{"success":false' <<<"$CURL_OUTPUT") ]]; then
 				_error "Cloudflare returned an error"
-				echo "$CURL_OUTPUT"
+				_error "$CURL_OUTPUT"
 				return 1
 			fi
 
 			_debug "json-filter: ${*}"
 			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
+			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
@@ -729,7 +759,7 @@ function call_cf_v4 () {
 				break
 			fi
 		done
-		CURL_OUTPUT_GLOBAL="$CURL_OUTPUT"
+		CURL_OUTPUT_GLOBAL="$PROCESSED_OUTPUT"
 		return $CURL_EXIT_CODE
 	fi
 }
@@ -830,8 +860,8 @@ findout_record() {
 # -- Arguments:	$1 - zone name
 # ===============================================
 function get_zone_id () {
-	local ZONE_ID ZONE=$1 CLI_ZONE=$1
-	_debug "Getting zone_id for $CLI_ZONE"
+	_debug_all "func get_zone_id: ${*}"
+	local ZONE_ID ZONE=$1 CLI_ZONE=$1	
 		
 	# -- Checking if zone is an ID or nam
 	is_hex "$CLI_ZONE"
@@ -839,15 +869,17 @@ function get_zone_id () {
 		_debug "Zone is an ID - $CLI_ZONE"
 		ZONE_ID=$1
 	else
-		_debug "Zone is a name - $CLI_ZONE"
-	
-	fi	
-	
+		_debug "Zone is a name - $CLI_ZONE"	
+	fi
+
 	# -- Get zoneid using call_cf_v4
-	ZONE_ID="$(call_cf_v4 GET /zones name="$ZONE" -- .result ,id)"	
-	if [[ -z "$ZONE_ID" ]]; then
-		_error "No such DNS zone found"
-		_die
+	ZONE_ID="$(call_cf_v4 GET /zones name="$ZONE" -- .result ,id)"
+	if [[ $? -ge 1 ]]; then
+		_error "Error getting zone id for $ZONE"
+		exit 1
+	elif [[ -z "$ZONE_ID" ]]; then
+		_error "No such DNS zone found - $ZONE"
+		exit 1
 	else 
 		_debug "ZONE_ID: $ZONE_ID"		
 	fi
@@ -877,15 +909,16 @@ do
 		TEST=$1;;
 	-D|--debug)
 		DEBUG=1;;
-	-DD|--debug2)
-		DEBUG=2;;
+	-DC|--debug-curl)
+		DEBUG=1
+		DEBUG_CURL_OUTPUT=2;;
 	-d|--detail|--detailed|--details)
 		details=1;;
 	-q|--quiet)
 		# TODO needs  to be re-implemmented
 		QUIET=1;;
 	-h|--help)
-		_error "$USAGE" 0
+		help full
 		_die
 		;;
 	--)	shift
@@ -899,13 +932,11 @@ done
 # -----------------------------------------------
 # -- debug
 # -----------------------------------------------
-# -- Check for debug2
-if [[ $DEBUG == "2" ]]; then
-	set -x;
-fi
 # -- Check for debug
 if [[ $DEBUG == "1" ]]; then
 	echo -e "${CYAN}** DEBUG: Debugging is on${ECOL}"
+elif [[ $DEBUG_CURL_OUTPUT == "2" ]]; then
+	echo -e "${CYAN}** DEBUG: Debugging is on + CURL OUTPUT${ECOL}"	
 fi
 
 # -----------------------------------------------
@@ -918,13 +949,13 @@ if [ ! -f "$HOME/.cloudflare" ]
 	if [ -z "$CF_ACCOUNT" ]
 	then
 		_error "No \$CF_ACCOUNT set."
-		cf-help usage
+		help usage
 		_die
 	fi
 	if [ -z "$CF_TOKEN" ]
 	then
 		_error "No \$CF_TOKEN set."
-		cf-help usage
+		help usage
 		_die
 	fi
 else
@@ -936,7 +967,7 @@ else
         if [ -z "$CF_ACCOUNT" ]
         then
                 _error "No \$CF_ACCOUNT set in config."
-                cf-help usage
+                help usage
 				_die
         fi
         if [ -z "$CF_TOKEN" ]
@@ -949,9 +980,13 @@ fi
 
 # -- Check for arguments
 if [ -z "$1" ]; then
-	cf-help usage
+	help usage
 	_die "Missing arguments" 1
 fi
+
+# -- Debug
+CMD_ALL="${*}"
+_running "Running: ${CMD_ALL}"
 
 # -- run commands
 CMD1=$1
@@ -962,14 +997,14 @@ case "$CMD1" in
 # ===============================================
 # -- show command @SHOW
 # ===============================================
-show|list)
-	_running "Running: $*"
+show|list)	
 	CMD2=$1
 	shift
 	case "$CMD2" in
 
 	# -- zone
 	zone)
+		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
 		call_cf_v4 GET /zone --		
 		;;
 	# -- zone
@@ -981,7 +1016,7 @@ show|list)
 
 	# -- settings
 	setting|settings)		
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 settings <zone>"
+		[ -z "$1" ] && { help show; _die "Missing sub-command for $CMD2"; }
 		CLI_ZONE=$1
 		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
 
@@ -1001,7 +1036,7 @@ show|list)
 		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
 
 		# -- Get zone data
-		_debug "Getting zone data for $ZONE_ID"
+		_debug "- Getting zone data for $ZONE_ID"
 		call_cf_v4 GET /zones/$ZONE_ID/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
 			',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		;;
@@ -1010,14 +1045,21 @@ show|list)
 	access-rules|listing|listings|blocking|blockings)
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
-
+	email-routing)
+		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
+		CLI_ZONE=$1
+		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
+		#call_cf_v4 GET /zones/$ZONE_ID/email/routing --  %"%-30s %s$TA%s%s$NL" ',name,enabled,created,modified,status'
+		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' '&<"
+		
+		;;
 	# -- no command catchall
 	*)
-		cf-help show
+		help show
 		if [[ -n $CMD2 ]]; then
 			_die "Unknown command $CMD2" 1
 		else
-			_die "No command provided" 1
+			_die "No command provided for $1" 1
 		fi
 		;;
 	esac
@@ -1027,14 +1069,13 @@ show|list)
 # -- add command @ADD
 # ===============================================
 add)
-	_running "Running: $*"
+	_debug "sub-command: add ${*}"
 	CMD2=$1
 	shift
 	case "$CMD2" in
-	record)
-		[ $# -lt 4 ] && _error "Missing arguments"; cf-help add record;
-
-		zone=$1
+	record)		
+		[ $# -lt 4 ] && { help add record;_die "Missing arguments - $CMD_ALL"; }
+		ZONE=$1
 		shift
 		type=${1^^}
 		shift
@@ -1056,12 +1097,16 @@ add)
 		[ -n "$ttl" ] || ttl=1
 		[ -n "$prio" ] || prio=10
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
-		get_zone_id "$zone"
-
+		
+		_running2 "Getting zone_id for $ZONE"
+		ZONE_ID="$(get_zone_id "$ZONE")"
+		_running2 " - Found zone $ZONE with id $ZONE_ID"
 
 		case "$type" in
 		MX)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}"
+			_running2 " -- Creating MX record: $name $content $ttl $prio"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}"
+			echo "Record created: $CURL_OUTPUT_GLOBAL"
 			;;
 		LOC)
 			locdata=''
@@ -1142,7 +1187,7 @@ add)
 		then
 			trg_type=country
 		fi
-		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
+		[ -z "$trg" -o -z "$trg_type" ] && _die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
 
 		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
@@ -1150,21 +1195,21 @@ add)
 	zone)
 		if [ $# != 1 ]
 		then
-			die "Usage: cloudflare add zone <name>"
+			_die "Usage: cloudflare add zone <name>"
 		fi
 		call_cf_v4 POST /zones "{\"name\":\"$1\",\"jump_start\":true}" -- .result '&<"status: $status"'
 		;;
 	*)
-		die "Parameters:
-   zone, record, whitelist, blacklist, challenge"
+	help add;
+	echo ""
+	_die "Missing sub-command"
 	esac
 	;;
 
 # ===============================================
 # -- delete command
 # ===============================================
-delete)
-	_running "Running: $*"
+delete)	
 	CMD2=$1
 	shift
 	case "$CMD2" in
@@ -1178,7 +1223,7 @@ delete)
 		then
 			if [ -n "$1" ]
 			then
-				die "Unknown parameters: ${*}"
+				_die "Unknown parameters: ${*}"
 			fi
 			if is_hex "$prm1"
 			then
@@ -1192,7 +1237,7 @@ delete)
 			record_type=''
 			first_match=0
 
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]"
+			[ -z "$prm1" ] && _die "Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]"
 
 			if [ "$prm2" = first ]
 			then
@@ -1204,10 +1249,10 @@ delete)
 			findout_record "$prm1" "$record_type" "$first_match"
 			case $? in
 			0)	true;;
-			2)	die "No suitable DNS zone found for \`$prm1'";;
-			3)	die "DNS record \`$prm1' not found";;
-			4)	die "Ambiguous record spec: \`$prm1'";;
-			*)	die "Internal error";;
+			2)	_die "No suitable DNS zone found for \`$prm1'";;
+			3)	_die "DNS record \`$prm1' not found";;
+			4)	_die "Ambiguous record spec: \`$prm1'";;
+			*)	_die "Internal error";;
 			esac
 		fi
 
@@ -1215,7 +1260,7 @@ delete)
 		;;
 
 	listing)
-		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
+		[ -z "$1" ] && _die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
 		while read ruleid trg notes; do
 			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
@@ -1232,14 +1277,14 @@ delete)
 	zone)
 		if [ $# != 1 ]
 		then
-			die "Usage: cloudflare delete zone <name>"
+			_die "Usage: cloudflare delete zone <name>"
 		fi
 		get_zone_id "$1"
 		call_cf_v4 DELETE /zones/$zone_id
 		;;
 
 	*)
-		die "Parameters:
+		_die "Parameters:
    zone, record, listing"
 	esac
 	;;
@@ -1248,15 +1293,14 @@ delete)
 # -- change|set command
 # ===============================================
 change|set)
-	_running "Running: $*"	
 	CMD2=$1
 	shift
 	
 	case "$CMD2" in
 	# -- Zone
 	zone)		
-		[ -z "$1" ] && { cf-help change; _die "Missing arguments"; }		
-		[ -z "$2" ] && { cf-help change; _die "Missing arguments"; }
+		[ -z "$1" ] && { help change; _die "Missing arguments"; }		
+		[ -z "$2" ] && { help change; _die "Missing arguments"; }
 		CLI_ZONE="$1"
 		ZONE_ID="$(get_zone_id $CLI_ZONE)"
 		shift
@@ -1281,7 +1325,7 @@ change|set)
 			if [ -n "${map[$setting]}" ]; then
 				setting=${map[$setting]}
 			else
-				cf-help change
+				help change
 				_die "Error: Setting '$setting' is not a valid setting"
 				exit 1
 			fi
@@ -1296,7 +1340,7 @@ change|set)
 				for s in ${setting_value//,/ }; do
 					case "$s" in
 					css|html|js) eval $s=on;;
-					*) die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
+					*) _die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
 					esac
 				done
 				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
@@ -1316,7 +1360,7 @@ change|set)
 		;;
 
 	record)
-	[ -z "$1" ] && { cf-help change; _die "Missing arguments"; }
+	[ -z "$1" ] && { help change; _die "Missing arguments"; }
 		record_name=$1
 		shift
 		record_type=''
@@ -1334,16 +1378,16 @@ change|set)
 			shift
 		done
 
-		[ -z "$1" ] && { cf-help change; _die "Missing arguments"; }		
+		[ -z "$1" ] && { help change; _die "Missing arguments"; }		
 
 		findout_record "$record_name" "$record_type" "$first_match" "$record_oldcontent"
 		e=$?
 		case $e in
 		0)	true;;
-		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	die "DNS record \`$record_name' not found";;
-		4)	die "Ambiguous record name: \`$record_name'";;
-		*)	die "Internal error";;
+		2)	_die "No suitable DNS zone found for \`$record_name'";;
+		3)	_die "DNS record \`$record_name' not found";;
+		4)	_die "Ambiguous record name: \`$record_name'";;
+		*)	_die "Internal error";;
 		esac
 
 		record_content_esc=${record_content//\"/\\\"}
@@ -1381,7 +1425,7 @@ change|set)
 		fi
 		;;
 	*)
-		cf-help change
+		help change
 		_die "Missing argument."   
 	esac
 	;;
@@ -1389,17 +1433,16 @@ change|set)
 # ===============================================
 # -- clear command
 # ===============================================
-clear)
-	_running "Running: $*"
+clear)	
 	case "$1" in
 	cache)
 		shift
-		[ -z "$1" ] && { cf-help clear; exit 1;}
+		[ -z "$1" ] && { help clear; exit 1;}
 		ZONE_ID=$(get_zone_id "$1")
 		call_cf_v4 DELETE /zones/$ZONE_ID/purge_cache '{"purge_everything":true}'
 		;;
 	*)
-		cf-help clear
+		help clear
 		exit 1;
 		;;
 	esac
@@ -1409,16 +1452,15 @@ clear)
 # -- check command
 # ----------------
 check)
-	_running "Running: $*"
 	case "$1" in
 	zone)
 		shift
-		[ -z "$1" ] && die "Usage: cloudflare check zone <zone>"
+		[ -z "$1" ] && _die "Usage: cloudflare check zone <zone>"
 		get_zone_id "$1"
 		call_cf_v4 PUT /zones/$zone_id/activation_check
 		;;
 	*)
-		die "Parameters:
+		_die "Parameters:
    zone"
 		;;
 	esac
@@ -1428,7 +1470,6 @@ check)
 # -- invalidate command
 # ---------------------
 invalidate)
-	_running "Running: $*"
 	if [ -n "$1" ]
 	then
 		urls=''
@@ -1460,11 +1501,11 @@ invalidate)
 		done
 		if [ -z "$zone_id" ]
 		then
-			die "Zone name could not be figured out."
+			_die "Zone name could not be figured out."
 		fi
 		call_cf_v4 DELETE /zones/$zone_id/purge_cache "{\"files\":[$urls]}"
 	else
-		die "Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]"
+		_die "Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]"
 	fi
 	;;
 
@@ -1472,18 +1513,23 @@ invalidate)
 # -- json command
 # ---------------
 json)
-	_running "Running: $*"
 	json_decode "${*}"
 	;;
 
+# -----------------------------------------------
+# -- pass command
+# -----------------------------------------------
+pass)	
+	call_cf_v4 ${*}
+	;;
 # ---------------
 # -- help command
 # ---------------
 help)
-	cf-help usage
+	help usage
 	;;
 *)
-	cf-help usage
+	help usage
 	_die "No Command provided." 1
 	;;
 esac
