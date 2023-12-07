@@ -1,0 +1,280 @@
+{
+	"result": [
+		{
+			"id": "nb9825b285n2p5424bp22945pb654b5",
+			"user": {
+				"id": "nb892nb823946mb23m632p4m623p46mb23",
+				"first_name": null,
+				"last_name": null,
+				"email": "test@domain.com",
+				"two_factor_authentication_enabled": true
+			},
+			"status": "accepted",
+			"api_access_enabled": null,
+			"policies": [
+				{
+					"id": "00000000000000000000000000000000",
+					"access": "allow",
+					"meta": {
+						"editable": "false"
+					},
+					"permission_groups": [
+						{
+							"id": "nbp928n3428mn23p432452b324b324bbb4b53",
+							"name": "Super Administrator - All Privileges",
+							"meta": {
+								"description": "Can edit any Cloudflare setting, make purchases, update billing, and manage memberships. Super Administrators can revoke the access of other Super Administrators.",
+								"editable": "false",
+								"label": "all_privileges",
+								"scopes": "com.cloudflare.api.account"
+							}
+						}
+					],
+					"resource_groups": [
+						{
+							"id": "00000000000000000000000000000000",
+							"name": "com.cloudflare.api.account.dfc2e6b66ce67e663eae1536b4c86b42",
+							"meta": {
+								"editable": "false"
+							},
+							"scope": {
+								"key": "com.cloudflare.api.account.dfc2e6b66ce67e663eae1536b4c86b42",
+								"objects": [
+									{
+										"key": "*",
+										"attributes": {
+											"editable": "false"
+										}
+									}
+								]
+							}
+						}
+					]
+				}
+			],
+			"roles": [
+				{
+					"id": "m54p48n8823pbm34b6v3166bbbb61361b636",
+					"name": "Super Administrator - All Privileges",
+					"description": "Can edit any Cloudflare setting, make purchases, update billing, and manage memberships. Super Administrators can revoke the access of other Super Administrators.",
+					"permissions": {
+						"access": {
+							"edit": true,
+							"read": true
+						},
+						"analytics": {
+							"edit": false,
+							"read": true
+						},
+						"api_gateway": {
+							"edit": true,
+							"read": true
+						},
+						"app": {
+							"edit": true,
+							"read": false
+						},
+						"auditlogs": {
+							"edit": false,
+							"read": true
+						},
+						"billing": {
+							"edit": true,
+							"read": true
+						},
+						"blocks": {
+							"edit": true,
+							"read": true
+						},
+						"cache_purge": {
+							"edit": true,
+							"read": false
+						},
+						"cds": {
+							"edit": true,
+							"read": true
+						},
+						"cds_compute_account": {
+							"edit": true,
+							"read": true
+						},
+						"ces_analytics": {
+							"edit": false,
+							"read": true
+						},
+						"ces_integration": {
+							"edit": true,
+							"read": true
+						},
+						"ces_phishguard": {
+							"edit": false,
+							"read": true
+						},
+						"ces_search": {
+							"action": true,
+							"edit": false,
+							"preview": true,
+							"raw": true,
+							"read": true,
+							"trace": true
+						},
+						"ces_settings": {
+							"edit": true,
+							"read": true
+						},
+						"cfone": {
+							"edit": true,
+							"read": true
+						},
+						"dash_sso": {
+							"edit": true,
+							"read": true
+						},
+						"dex": {
+							"edit": true,
+							"read": true
+						},
+						"dns_records": {
+							"edit": true,
+							"read": true
+						},
+						"fbm": {
+							"edit": true,
+							"read": true
+						},
+						"fbm_acc": {
+							"edit": true,
+							"read": false
+						},
+						"healthchecks": {
+							"edit": true,
+							"read": true
+						},
+						"http_applications": {
+							"edit": true,
+							"read": true
+						},
+						"image": {
+							"edit": true,
+							"read": true
+						},
+						"integration": {
+							"edit": true,
+							"install": true,
+							"read": true
+						},
+						"lb": {
+							"edit": true,
+							"read": true
+						},
+						"legal": {
+							"edit": true,
+							"read": true
+						},
+						"logs": {
+							"edit": true,
+							"read": true
+						},
+						"magic": {
+							"edit": true,
+							"read": true
+						},
+						"member": {
+							"edit": true,
+							"read": true
+						},
+						"organization": {
+							"edit": true,
+							"read": true
+						},
+						"page_shield": {
+							"edit": true,
+							"read": true
+						},
+						"query_cache": {
+							"edit": true,
+							"read": true
+						},
+						"r2_bucket": {
+							"edit": true,
+							"read": true
+						},
+						"ssl": {
+							"edit": true,
+							"read": true
+						},
+						"stream": {
+							"edit": true,
+							"read": true
+						},
+						"subscription": {
+							"edit": true,
+							"read": true
+						},
+						"teams": {
+							"edit": true,
+							"pii": true,
+							"read": true,
+							"report": true
+						},
+						"turnstile": {
+							"edit": true,
+							"read": true
+						},
+						"vectorize": {
+							"edit": true,
+							"read": true
+						},
+						"waf": {
+							"edit": true,
+							"read": true
+						},
+						"waitingroom": {
+							"edit": true,
+							"read": true
+						},
+						"webhooks": {
+							"edit": true,
+							"read": true
+						},
+						"worker": {
+							"edit": true,
+							"read": true
+						},
+						"zaraz": {
+							"edit": true,
+							"publish": true,
+							"read": true
+						},
+						"zone": {
+							"edit": true,
+							"read": true
+						},
+						"zone_settings": {
+							"edit": true,
+							"read": true
+						},
+						"zone_versioning": {
+							"edit": true,
+							"read": true
+						}
+					}
+				}
+			]
+		}
+	],
+	"result_info": {
+		"page": 1,
+		"per_page": 20,
+		"total_pages": 1,
+		"count": 1,
+		"total_count": 1
+	},
+	"success": true,
+	"errors": [
+
+	],
+	"messages": [
+
+	]
+}
