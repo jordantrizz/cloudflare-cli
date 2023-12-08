@@ -1,0 +1,6 @@
+add record $ZONE_ID mx @ ASPMX.L.GOOGLE.COM 1 1
+add record $ZONE_ID mx @ ALT1.ASPMX.L.GOOGLE.COM 1 5
+add record $ZONE_ID mx @ ALT2.ASPMX.L.GOOGLE.COM 1 5
+add record $ZONE_ID mx @ ALT3.ASPMX.L.GOOGLE.COM 1 10
+add record $ZONE_ID mx @ ALT4.ASPMX.L.GOOGLE.COM 1 10
+add record $ZONE_ID TXT @ 'v=spf1 include:_spf.google.com ~all' 1

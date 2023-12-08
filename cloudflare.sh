@@ -280,6 +280,21 @@ Usage: cloudflare change
 ${HELP_VERSION}
 "
 
+HELP_TEMPLATE="${HELP_CMDS_SHORT}
+
+Usage: cloudflare template [list|apply <zone> <template>]
+
+	Commands:
+	---------
+	list    - List available templates
+	apply   - Apply template to <zone>
+
+	Options:
+	--------
+	<zone> domain zone to apply template to, see 'show zones' command
+	<template> template to apply, see 'template list' command
+"
+
 # -----------------------------------------------
 # -- help
 # -----------------------------------------------
@@ -325,6 +340,9 @@ shift
 		change)
 			echo "$HELP_CHANGE"
 		;;
+		template)
+			echo "$HELP_TEMPLATE"
+		;;
 		*)
 		echo "$HELP_USAGE"
 		;;
@@ -338,7 +356,7 @@ esac
 # -----------------------------------------------
 # -- json_decode - php code to decode json
 # -----------------------------------------------
-function json_decode () {
+json_decode() {
 	# Parameter Synatx
 	#
 	# .key1.key11.key111
@@ -705,7 +723,7 @@ function call_cf_v4 () {
 			_debug "Parameters: ${*}"
 			break
 		else
-			CURL_OPTS+=(--"$FORMTYPE" $1)
+			CURL_OPTS+=(--"$FORMTYPE" "$1")
 		fi
 		shift
 	done
@@ -727,9 +745,21 @@ function call_cf_v4 () {
 			QUERY_STRING="?page=$RESULT_PAGE&per_page=$RESULTS_PER_PAGE"
 
 			# Run curl command
-			_debug "CMD: curl -X $METHOD ${CURL_OPTS[*]} ${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}"
-			CURL_OUTPUT="$(curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
-				-X "$METHOD" "${CURL_OPTS[@]}" "${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}")"
+			_debug "CMD: curl -sS ${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING} -X $METHOD ${CURL_OPTS[*]}"
+			
+			if [[ $DEBUG == "1" ]]; then
+				set -x
+			fi
+				CURL_OUTPUT="$(curl -sS "${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}" \
+				-H "X-Auth-Email: $CF_ACCOUNT"\
+				-H "X-Auth-Key: $CF_TOKEN" \
+				-X "$METHOD" \
+				"${CURL_OPTS[@]}" \
+				)"
+			if [[ $DEBUG == "1" ]]; then
+				set +x
+			fi 
+					
 			CURL_EXIT_CODE=$?
 			_debug "CURL_OUTPUT: $CURL_OUTPUT" 2
 			_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
@@ -865,23 +895,22 @@ function get_zone_id () {
 		
 	# -- Checking if zone is an ID or nam
 	is_hex "$CLI_ZONE"
-	if [ $? == true ]; then
+	if [ $? == 0 ]; then
 		_debug "Zone is an ID - $CLI_ZONE"
-		ZONE_ID=$1
+		ZONE_ID=$1		
 	else
 		_debug "Zone is a name - $CLI_ZONE"	
-	fi
-
-	# -- Get zoneid using call_cf_v4
-	ZONE_ID="$(call_cf_v4 GET /zones name="$ZONE" -- .result ,id)"
-	if [[ $? -ge 1 ]]; then
-		_error "Error getting zone id for $ZONE"
-		exit 1
-	elif [[ -z "$ZONE_ID" ]]; then
-		_error "No such DNS zone found - $ZONE"
-		exit 1
-	else 
-		_debug "ZONE_ID: $ZONE_ID"		
+		# -- Get zoneid using call_cf_v4
+		ZONE_ID="$(call_cf_v4 GET /zones name="$ZONE" -- .result ,id)"
+		if [[ $? -ge 1 ]]; then
+			_error "Error getting zone id for $ZONE"
+			exit 1
+		elif [[ -z "$ZONE_ID" ]]; then
+			_error "No such DNS zone found - $ZONE"
+			exit 1
+		else 
+			_debug "ZONE_ID: $ZONE_ID"		
+		fi
 	fi
 	echo "$ZONE_ID"
 }
@@ -1050,7 +1079,7 @@ show|list)
 		CLI_ZONE=$1
 		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
 		#call_cf_v4 GET /zones/$ZONE_ID/email/routing --  %"%-30s %s$TA%s%s$NL" ',name,enabled,created,modified,status'
-		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' '&<"
+		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' 
 		
 		;;
 	# -- no command catchall
@@ -1129,7 +1158,7 @@ add)
 			then
 				ttl=${1:-1}
 			fi
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}"
 			;;
 		SRV)
 			[ "${service:0:1}" = _ ] || service="_$service"
@@ -1137,7 +1166,7 @@ add)
 			[ -n "$weight" ] || weight=1
 			target=$content
 
-			call_cf_v4 POST /zones/$zone_id/dns_records "{
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{
 				\"type\":\"$type\",
 				\"ttl\":$ttl,
 				\"data\":{
@@ -1152,16 +1181,16 @@ add)
 				}"
 			;;
 		TXT)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
 			;;
 		A)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
 			;;
 		CNAME)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
 			;;
 		*)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
+			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
 			;;
 		esac
 		;;
@@ -1509,13 +1538,101 @@ invalidate)
 	fi
 	;;
 
+# -----------------------------------------------
+# -- template ( $TEMPLATE_NAME, $ZONE_ID )
+# -----------------------------------------------
+template)
+	_debug_all "func template: ${*}"	
+	ZONE=$2
+	TEMPLATE_NAME=$3
+
+	case "$1" in
+	# -- list templates in /template
+	list)
+		_running "Listing templates"
+		ls -1 templates
+		;;
+	apply)
+		_debug "Applying template"
+
+		# -- Check for template name
+		if [ -z "$TEMPLATE_NAME" ]; then
+			help template
+			_die "Missing template name"
+		fi
+
+		# -- Check for zone id
+		if [ -z "$ZONE" ]; then
+			help template
+			_die "Missing zone"
+		fi
+
+		# -- Check for template file
+		if [ ! -f "templates/$TEMPLATE_NAME" ]; then
+			help template
+			_die "Template file not found - templates/$TEMPLATE_NAME"
+		fi
+
+		# -- Get template data, skip # comment lines
+		TEMPLATE_DATA="$(grep -v '^#' "templates/$TEMPLATE_NAME")"
+		_debug "TEMPLATE_DATA: $TEMPLATE_DATA"
+
+		# -- Get zone_id
+		_running2 "Getting zone_id for $ZONE"
+		ZONE_ID="$(get_zone_id "$ZONE")"
+		_debug "ZONE_ID: $ZONE_ID"
+		
+		# -- Run commands in template
+		_running2 "Run below commands?"
+		_running2 "-------------------"
+		_running2 "Zone: $ZONE"
+		_running2 "Zone ID: $ZONE_ID"
+		_running2 "Template: $TEMPLATE_NAME"
+		_running2 "Commands:"
+		_running2 "-------------------"
+		_running2 "$TEMPLATE_DATA"
+		_running2 "-------------------"
+		_running2 "Continue?"
+		_running2 "-------------------"
+		read -r -p "Continue? [y/N] " response
+		
+		# -- Check response
+		case "$response" in
+		[yY][eE][sS]|[yY]) 
+			_debug "Continuing"
+			;;
+		*)
+			_die "Aborting"
+			;;
+		esac
+
+		_running2 "Running commands in template"
+		while read -r line; do
+			expanded_line="$(eval "echo \"$line\"")"
+			_debug "Running command: $0 $expanded_line"
+			"$0" $expanded_line
+		done <<< "$TEMPLATE_DATA"
+		;;
+	*)
+		help template;
+		_die "Missing sub-command"
+		;;	
+	esac
+	;;
+
 # ---------------
 # -- json command
 # ---------------
 json)
 	json_decode "${*}"
 	;;
-
+# -----------------------------------------------
+# -- ishex command
+# -----------------------------------------------
+ishex)
+	is_hex "${*}"
+	echo $?
+	;;
 # -----------------------------------------------
 # -- pass command
 # -----------------------------------------------
