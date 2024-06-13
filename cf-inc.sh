@@ -17,10 +17,12 @@ CF_API_ENDPOINT=https://api.cloudflare.com/client/v4
 APIv4_ENDPOINT=$CF_API_ENDPOINT # Remove eventually
 
 # -- Colors
+BLACK="\e[30m"
 RED="\e[31m"
 GREEN="\e[32m"
 CYAN="\e[36m"
 BLUEBG="\e[44m"
+YELLOW="\e[33m"
 YELLOWBG="\e[43m"
 DARKGREYBG="\e[100m"
 DARKGRAYFG="\e[90m"
@@ -49,34 +51,39 @@ HELP_OPTIONS="Options:
 # -----------------------------------------------
 HELP_FULL="Usage: cloudflare [Options] <command> <parameters>
 
-Commands:
+Main Commands:
 ---------
-    list    - Show information about an object
-                zone <zone>
-                zones
-                settings <zone>
-                records <zone>
-                access-lists <zone>
+    list        - Show information about an object
+                    zone <zone>
+                    zones
+                    settings <zone>
+                    records <zone>
+                    access-lists <zone>
 
-    add     - Create Object
-                zone
-                record
-                whitelist
-                blacklist
-                challenge
+    add         - Create Object
+                    zone
+                    record
+                    whitelist
+                    blacklist
+                    challenge
 
-    delete   - Delete Objects
-                zone
-                record
-                listing
+    delete      - Delete Objects
+                    zone
+                    record
+                    listing
 
-    change   - Change Object
-                zone
-                record
+    change      - Change Object
+                    zone
+                    record
 
-    template - Apply template to zone
-                list
-                apply <zone> <template>
+    template    - Apply template to zone
+                    list
+                    apply <zone> <template>
+
+	search	    - Search for object
+                    zone <query> (Return one zone)
+                    zones <query> (Return all zones that match)
+                    record <query>
 
     clear       - Clear cache
                     cache <zone>
@@ -84,6 +91,13 @@ Commands:
 
 	invalidate  - Invalidate cache
                     <url> url to invalidate
+
+Additional Commands:
+--------------------
+    account    - Show account information
+				list
+				details	<account_id>
+				zones <account_id>
 	
 	check       - Activate check
                     zone <zone>
@@ -124,13 +138,20 @@ HELP_CMDS="Commands:
     add         zone, record, whitelist, blacklist, challenge
     delete      zone, record, listing
     change      zone, record
-    template    list, apply
     clear       cache
-    check
-    json
-    pass
-    help
-    examples"
+    invalidate  url	
+    template    list, apply
+    search      zone, record
+
+Additional Commands:
+--------------------
+    account     list,details,zones 	- Show account information
+    check       - Activate check	
+    json        - Test json_decode function
+    ishex       - Check if string is hex
+    pass        - Pass through queries to CF API
+    help        - Full help
+    examples    - Show Examples"
 
 # -----------------------------------------------
 # -- HELP_CMDS_SHORT
@@ -616,8 +637,11 @@ json_decode() {
 # -----------------------------------------------
 _error () { echo -e "${RED}** ERROR ** - $1 ${ECOL}"; }
 _success () { echo -e "${GREEN}** SUCCESS ** - ${*} ${ECOL}"; }
-_running () { echo -e "${BLUEBG}${*}${ECOL}"; }
-_running2 () { echo -e "${DARKGRAYFG}${*}${ECOL}"; }
+_warning () { echo -e "${YELLOW}** WARNING ** - ${*} ${ECOL}"; }
+_notice () { echo -e "${CYAN}** NOTICE ** - ${*} ${ECOL}"; }
+_running () { echo -e "${YELLOWBG}${BLACK}${*}${ECOL}"; }
+_running2 () { echo -e "${DARKGREYBG}${*}${ECOL}"; }
+_running3 () { echo -e "${DARKGRAYFG}${*}${ECOL}"; }
 _creating () {  echo -e "${DARKGREYBG}${*}${ECOL}"; }
 _separator () {  echo -e "${YELLOWBG}****************${ECOL}"; }
 
@@ -665,6 +689,14 @@ function _die () {
 # -- is_hex
 # -----------------------------------------------
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
+
+# -----------------------------------------------
+# -- _escape_string
+# -- Escape json with slashes for curl
+# -----------------------------------------------
+function _escape_string () {
+	echo "$1" | sed 's/"/\\"/g'
+}
 
 # ==============================================================================================
 # -- Check Functions
@@ -761,8 +793,8 @@ function call_cf_v4 () {
 
 	local FORMTYPE
 	local QUERY_STRING
-	local RESULT_PAGE=1 RESULTS_PER_PAGE=50
-	local CURL_EXIT_CODE CURL_OUTPUT 
+	[[ -n $OVERRIDE_RESULT_PAGE ]] && RESULT_PAGE=$OVERRIDE_RESULT_PAGE || RESULT_PAGE=1
+	[[ -n $OVERRIDE_RESULTS_PER_PAGE ]] && RESULTS_PER_PAGE=$OVERRIDE_RESULTS_PER_PAGE || RESULTS_PER_PAGE=50
 	declare -a CURL_OPTS
 	CURL_OPTS=()	
 
@@ -818,7 +850,7 @@ function call_cf_v4 () {
 			# Run curl command
 			_debug "CMD: curl -sS ${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING} -X $METHOD ${CURL_OPTS[*]}"
 			
-			if [[ $DEBUG == "1" ]]; then
+			if [[ $DEBUG_CURL == "1" ]]; then
 				set -x
 			fi
 				CURL_OUTPUT="$(curl -sS "${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}" \
@@ -827,7 +859,7 @@ function call_cf_v4 () {
 				-X "$METHOD" \
 				"${CURL_OPTS[@]}" \
 				)"
-			if [[ $DEBUG == "1" ]]; then
+			if [[ $DEBUG_CURL == "1" ]]; then
 				set +x
 			fi 
 					
@@ -856,8 +888,10 @@ function call_cf_v4 () {
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
-				(( page++ )) || true
+				_debug "More results available"
+				(( RESULT_PAGE++ )) || true				
 			else
+				_debug "No more results"
 				break
 			fi
 		done
@@ -969,20 +1003,76 @@ function get_zone_id () {
 	is_hex "$CLI_ZONE"
 	if [ $? == 0 ]; then
 		_debug "Zone is an ID - $CLI_ZONE"
-		ZONE_ID=$1		
+		ZONE_ID=$1
 	else
 		_debug "Zone is a name - $CLI_ZONE"	
 		# -- Get zoneid using call_cf_v4
 		ZONE_ID="$(call_cf_v4 GET /zones name="$ZONE" -- .result ,id)"
-		if [[ $? -ge 1 ]]; then
-			_error "Error getting zone id for $ZONE"
-			exit 1
-		elif [[ -z "$ZONE_ID" ]]; then
-			_error "No such DNS zone found - $ZONE"
-			exit 1
-		else 
-			_debug "ZONE_ID: $ZONE_ID"		
+		if [[ $? -ge 1 ]]; then			
+			return 1
+		elif [[ -z "$ZONE_ID" ]]; then			
+			return 1
 		fi
 	fi
 	echo "$ZONE_ID"
+}
+
+# ===============================================
+# -- zone_exists - check if zone exists
+# --
+# -- Arguments:	$1 - zone name
+# ===============================================
+function zone_exists () {
+	_debug_all "func zone_exists: ${*}"
+	local ZONE="$1"
+	
+	get_zone_id "$ZONE"
+	if [[ $? -ge 1 ]]; then
+		_die "Zone does not exist - $ZONE"		
+	else
+		_success "Zone exists - $ZONE"		
+	fi
+
+}
+
+# ===============================================
+# -- zone_search - search for zone based on query
+# --
+# -- Arguments:	$1 - query
+# ===============================================
+function zone_search () {
+	_debug_all "func zone_search: ${*}"
+	local QUERY="$1" SEARCH_ZONE_OUTPUT SUCCESS="0" ZONES_FOUND=""
+
+	# Get a list of all domains and put it into an array.
+	# Get a list of 100 damains at a time. Then wait 5 seconds
+	# Then loop through the array and check if the domain is in the list.
+	# If it is, then get the zone id and break the loop.
+	# If it is not, then get the next 100 domains and repeat the process.
+	# If the domain is not found, then return an error.
+
+	# Start first loop
+	OVERRIDE_RESULTS_PER_PAGE=100
+	OVERRIDE_RESULT_PAGE=1
+	_debug "PER_PAGE: $OVERRIDE_RESULT_PAGE PAGE: $OVERRIDE_RESULTS_PER_PAGE"
+	_debug "SEARCH_ZONE_OUTPUT: $SEARCH_ZONE_OUTPUT"
+	SEARCH_ZONE_OUTPUT=$(call_cf_v4 GET /zones -- .result %"%s$NL" ,name)
+
+	# A list of all zones on a new line are in $SEARCH_ZONE_OUTPUT
+	# Loop through the list of zones and return anything containing $QUERY
+	# If found, then return the zone name
+	# If not found, then return an error
+	for zone in $SEARCH_ZONE_OUTPUT; do
+		if [[ $zone == *"$QUERY"* ]]; then
+			SUCCESS="1"
+			ZONES_FOUND+="$zone\n"			
+		fi
+	done
+
+	if [[ $SUCCESS == "1" ]]; then
+		_success "Found the following zones:"
+		echo -e "$ZONES_FOUND"		
+	else
+		_error "Zone not found - $QUERY"
+	fi
 }

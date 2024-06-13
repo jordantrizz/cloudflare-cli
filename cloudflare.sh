@@ -34,7 +34,7 @@ do
 			DEBUG=1;;
 		-DC|--debug-curl)
 			DEBUG=1
-			DEBUG_CURL_OUTPUT=2;;
+			DEBUG_CURL_OUTPUT=1;;
 		-d|--detail|--detailed|--details)
 			details=1;;
 		-q|--quiet)
@@ -62,25 +62,36 @@ fi
 CMD_ALL="${*}"
 _running "Running: ${CMD_ALL}"
 
-# ==============================================================================================
+# =================================================================================================
 # -- Process Commands
-# ==============================================================================================
+# =================================================================================================
 CMD1=$1
 shift
 case "$CMD1" in
 
-# ===============================================
+# =================================================================================================
 # -- show command @SHOW
-# ===============================================
+# =================================================================================================
 show|list)	
 	CMD2=$1
 	shift
 	case "$CMD2" in
 
 	# -- zone
-	zone)
+	zone)		
 		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
-		call_cf_v4 GET /zone --		
+		DOMAIN="$1"
+		zone_exists "$DOMAIN"
+		ZONE_ID=$(get_zone_id "$DOMAIN")
+		if [ $? ]; then
+			_running2 "Getting zone details for $DOMAIN with ID $ZONE_ID"
+			LIST_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
+			LIST_ZONE_OUTPUT+="----\t------\t----\t--\t------------\t-------------------\n"
+			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+			echo -e "$LIST_ZONE_OUTPUT" | column -t -s $'\t'
+		else
+			_die "No zone found for $DOMAIN"
+		fi
 		;;
 	# -- zone
 	zones)
@@ -92,8 +103,14 @@ show|list)
 	# -- settings
 	setting|settings)		
 		[ -z "$1" ] && { help show; _die "Missing sub-command for $CMD2"; }
-		CLI_ZONE=$1
+		CLI_ZONE="$1"
+		zone_exists "$CLI_ZONE"
 		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
+		if [ $? ]; then
+			_running2 "Getting settings for $CLI_ZONE"
+		else
+			_die "No zone found for $CLI_ZONE"
+		fi
 
 		if [ "$details" = 1 ]; then		
 			fieldspec=,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
@@ -107,8 +124,9 @@ show|list)
 	record|records)
 		_running "Running: cloudflare $CMD1 records $*"
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
-		CLI_ZONE=$1
-		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
+		CLI_ZONE="$1"
+		zone_exists "$CLI_ZONE"
+		ZONE_ID="$(get_zone_id "$CLI_ZONE")"		
 
 		# -- Get zone data
 		_debug "- Getting zone data for $ZONE_ID"
@@ -122,8 +140,11 @@ show|list)
 		;;
 	email-routing)
 		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
-		CLI_ZONE=$1
+		CLI_ZONE="$1"
+		zone_exists "$CLI_ZONE"
 		ZONE_ID="$(get_zone_id "$CLI_ZONE")"
+
+
 		#call_cf_v4 GET /zones/$ZONE_ID/email/routing --  %"%-30s %s$TA%s%s$NL" ',name,enabled,created,modified,status'
 		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' 
 		
@@ -140,9 +161,9 @@ show|list)
 	esac
 	;;
 
-# ===============================================
+# =================================================================================================
 # -- add command @ADD
-# ===============================================
+# =================================================================================================
 add)
 	_debug "sub-command: add ${*}"
 	CMD2=$1
@@ -174,14 +195,18 @@ add)
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		
 		_running2 "Getting zone_id for $ZONE"
+		zone_exists "$ZONE"
 		ZONE_ID="$(get_zone_id "$ZONE")"
 		_running2 " - Found zone $ZONE with id $ZONE_ID"
+
+		RECORD_CREATE_OUTPUT="ID\tZone Name\tName\tType\tContent\tProxiable\tProxied\tTTL"
+		RECORD_CREATE_OUTPUT+="\n--\t---------\t----\t----\t-------\t---------\t-------\t---\n"
 
 		case "$type" in
 		MX)
 			_running2 " -- Creating MX record: $name $content $ttl $prio"
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}"
-			echo "Record created: $CURL_OUTPUT_GLOBAL"
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}")
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'			
 			;;
 		LOC)
 			locdata=''
@@ -204,7 +229,9 @@ add)
 			then
 				ttl=${1:-1}
 			fi
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}"
+			_running2 " -- Creating LOC record: $name $content $ttl"
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}")
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		SRV)
 			[ "${service:0:1}" = _ ] || service="_$service"
@@ -227,16 +254,27 @@ add)
 				}"
 			;;
 		TXT)
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
+			_running2 " -- Creating TXT record: $name $content $ttl"
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		A)
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			_running2 " -- Creating A record: $name $content $ttl $proxied"
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		CNAME)
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			_running2 " -- Creating CNAME record: $name $content $ttl $proxied"
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
-		*)
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
+
+		*)  
+			_running2 " -- Creating record: $name $content $ttl"
+			#  ,id,zone_name,name,type,content,proxiable,proxied,ttl			
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
+
 			;;
 		esac
 		;;
@@ -267,12 +305,51 @@ add)
 		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
 
-	zone)
-		if [ $# != 1 ]
-		then
-			_die "Usage: cloudflare add zone <name>"
+	zone)		
+		# Usage: cloudflare add zone <zone> [account-id] 
+		DOMAIN="$1"
+		ACCOUNT_ID="$2"
+		if [ -z "$DOMAIN" ]; then
+			_die "Usage: cloudflare add zone <zone> [account-id]"					
 		fi
-		call_cf_v4 POST /zones "{\"name\":\"$1\",\"jump_start\":true}" -- .result '&<"status: $status"'
+
+		# Check if zone already exists
+		_running2 "Checking if zone $DOMAIN already exists"		
+		ZONE_ID=$(get_zone_id "$DOMAIN")			
+		if [ $? ]; then
+			_running2 "Zone $DOMAIN does not exist"
+		else
+			_error "Zone $DOMAIN already exists with ID $ZONE_ID"
+			exit
+		fi
+
+
+		# -- Check if account id is provided
+		if [ -n "$ACCOUNT_ID" ]; then
+			_running2 "Account ID provided: $ACCOUNT_ID"
+			_debug "Account ID provided: $ACCOUNT_ID"
+			JSON="{\"account\":{\"id\":\"$ACCOUNT_ID\"},\"name\":\"$DOMAIN\",\"jump_start\":true}"
+		else
+			_running2 "No Account ID provided, creating in default account"
+			_debug "No Account ID provided"
+			JSON="{\"name\":\"$DOMAIN\",\"jump_start\":true}"
+		fi
+
+		# -- Create a new zone
+		CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers)
+		CREATE_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\n"
+		CREATE_ZONE_OUTPUT+="----\t------\t----\t--\t------------\n"
+		CREATE_ZONE_OUTPUT+=$CREATE_ZONE_OUTPUT_CMD
+		
+		
+		_success "Zone created" 
+		echo -e "$CREATE_ZONE_OUTPUT" | column -t -s $'\t'
+		echo ""
+
+		_notice "Please make sure to update your name servers to the following:"
+		# Get name servers
+		echo "$CREATE_ZONE_OUTPUT_CMD" | awk '{print $5}'
+
 		;;
 	*)
 	help add;
@@ -281,10 +358,10 @@ add)
 	esac
 	;;
 
-# ===============================================
+# =================================================================================================
 # -- delete command
-# ===============================================
-delete)	
+# =================================================================================================
+delete)
 	CMD2=$1
 	shift
 	case "$CMD2" in
@@ -354,8 +431,37 @@ delete)
 		then
 			_die "Usage: cloudflare delete zone <name>"
 		fi
-		get_zone_id "$1"
-		call_cf_v4 DELETE /zones/$zone_id
+		DOMAIN="$1"
+		zone_exists "$DOMAIN"
+		ZONE_ID=$(get_zone_id "$DOMAIN")
+		if [[ -z "$ZONE_ID" ]]; then
+			_die "No zone found for $DOMAIN"
+		fi
+
+		_running2 "Deleting zone $DOMAIN with ID $ZONE_ID"	
+		# Confirm deletion
+		echo ""
+		echo "===================================================================="
+		_error "This will delete zone $DOMAIN with ID $ZONE_ID"		
+		DELETE_ZONE_ACCOUNT_DETAILS="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
+		DELETE_ZONE_ACCOUNT_DETAILS+="----\t------\t----\t--\t------------\t-------------------\n"
+		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		echo -e "$DELETE_ZONE_ACCOUNT_DETAILS" | column -t -s $'\t'
+		echo "===================================================================="
+		echo ""
+
+		_running2 "Are you sure you want to delete zone $DOMAIN with ID $ZONE_ID?"
+		read -r -p "Continue? [y/N] " response
+		case "$response" in
+		[yY][eE][sS]|[yY]) 
+			_debug "Continuing"
+			;;
+		*)
+			_die "Aborting"
+			;;
+		esac
+		_running2 "Deleting zone $DOMAIN with ID $ZONE_ID"
+		call_cf_v4 DELETE /zones/$ZONE_ID
 		;;
 
 	*)
@@ -364,9 +470,9 @@ delete)
 	esac
 	;;
 
-# ===============================================
+# =================================================================================================
 # -- change|set command
-# ===============================================
+# =================================================================================================
 change|set)
 	CMD2=$1
 	shift
@@ -377,7 +483,8 @@ change|set)
 		[ -z "$1" ] && { help change; _die "Missing arguments"; }		
 		[ -z "$2" ] && { help change; _die "Missing arguments"; }
 		CLI_ZONE="$1"
-		ZONE_ID="$(get_zone_id $CLI_ZONE)"
+		zone_exists "$CLI_ZONE"
+		ZONE_ID="$(get_zone_id $CLI_ZONE)"		
 		shift
 		setting_items=''
 
@@ -505,15 +612,17 @@ change|set)
 	esac
 	;;
 
-# ===============================================
+# =================================================================================================
 # -- clear command
-# ===============================================
+# =================================================================================================
 clear)	
 	case "$1" in
-	cache)
+	cache)		
 		shift
 		[ -z "$1" ] && { help clear; exit 1;}
-		ZONE_ID=$(get_zone_id "$1")
+		CLI_ZONE="$1"
+		zone_exists "$CLI_ZONE"
+		ZONE_ID=$(get_zone_id "$CLI_ZONE")
 		call_cf_v4 DELETE /zones/$ZONE_ID/purge_cache '{"purge_everything":true}'
 		;;
 	*)
@@ -523,27 +632,9 @@ clear)
 	esac
 	;;
 
-# ----------------
-# -- check command
-# ----------------
-check)
-	case "$1" in
-	zone)
-		shift
-		[ -z "$1" ] && _die "Usage: cloudflare check zone <zone>"
-		get_zone_id "$1"
-		call_cf_v4 PUT /zones/$zone_id/activation_check
-		;;
-	*)
-		_die "Parameters:
-   zone"
-		;;
-	esac
-	;;
-
-# ---------------------
+# =================================================================================================
 # -- invalidate command
-# ---------------------
+# =================================================================================================
 invalidate)
 	if [ -n "$1" ]
 	then
@@ -584,22 +675,23 @@ invalidate)
 	fi
 	;;
 
-# -----------------------------------------------
+# =================================================================================================
 # -- template ( $TEMPLATE_NAME, $ZONE_ID )
-# -----------------------------------------------
+# =================================================================================================
 template)
-	_debug_all "func template: ${*}"	
-	ZONE=$2
-	TEMPLATE_NAME=$3
+	_debug_all "func template: ${*}"		
+	CMD=$1
+	shift
+	TEMPLATE_NAME=$1
+	shift
 
-	case "$1" in
+	case "$CMD" in
 	# -- list templates in /template
 	list)
 		_running "Listing templates"
 		ls -1 templates
 		;;
-	apply)
-		_debug "Applying template"
+	apply)		
 
 		# -- Check for template name
 		if [ -z "$TEMPLATE_NAME" ]; then
@@ -607,62 +699,183 @@ template)
 			_die "Missing template name"
 		fi
 
-		# -- Check for zone id
-		if [ -z "$ZONE" ]; then
-			help template
-			_die "Missing zone"
-		fi
-
 		# -- Check for template file
 		if [ ! -f "templates/$TEMPLATE_NAME" ]; then
 			help template
 			_die "Template file not found - templates/$TEMPLATE_NAME"
+		else
+			_success "Template file found - templates/$TEMPLATE_NAME"
+			TEMPLATE_FILE="templates/$TEMPLATE_NAME"
 		fi
 
-		# -- Get template data, skip # comment lines
-		TEMPLATE_DATA="$(grep -v '^#' "templates/$TEMPLATE_NAME")"
-		_debug "TEMPLATE_DATA: $TEMPLATE_DATA"
+		# Parse command line options
+		_running2 "Parsing command line options"
+		declare -A ARG_VARIABLES
+		declare -a REQUIRED_VARIABLES
 
-		# -- Get zone_id
-		_running2 "Getting zone_id for $ZONE"
-		ZONE_ID="$(get_zone_id "$ZONE")"
-		_debug "ZONE_ID: $ZONE_ID"
-		
-		# -- Run commands in template
-		_running2 "Run below commands?"
-		_running2 "-------------------"
-		_running2 "Zone: $ZONE"
-		_running2 "Zone ID: $ZONE_ID"
-		_running2 "Template: $TEMPLATE_NAME"
-		_running2 "Commands:"
-		_running2 "-------------------"
-		_running2 "$TEMPLATE_DATA"
-		_running2 "-------------------"
-		_running2 "Continue?"
-		_running2 "-------------------"
-		read -r -p "Continue? [y/N] " response
-		
-		# -- Check response
-		case "$response" in
-		[yY][eE][sS]|[yY]) 
-			_debug "Continuing"
+		while [[ "$1" != "--" && $# -gt 0 ]]; do
+		case "$1" in
+			-v|--variable)
+			shift
+			key_value="$1"
+			IFS='=' read -r key value <<< "$key_value"
+			ARG_VARIABLES["$key"]="$value"
 			;;
-		*)
-			_die "Aborting"
+			*)
+			usage
 			;;
 		esac
+		shift
+		done
 
-		_running2 "Running commands in template"
-		while read -r line; do
-			expanded_line="$(eval "echo \"$line\"")"
-			_debug "Running command: $0 $expanded_line"
-			"$0" $expanded_line
-		done <<< "$TEMPLATE_DATA"
+		TEMPLATE_CONTENT=$(<"$TEMPLATE_FILE")
+
+		# Function to apply variables to template
+		apply_template() {
+			local content="$1"
+			for key in "${!ARG_VARIABLES[@]}"; do
+				content="${content//\$$key/${ARG_VARIABLES[$key]}}"
+			done
+			echo "$content"
+		}
+
+		# Parse the template for variable definitions and commands
+		_running2 "Parsing template for variables"
+		while IFS= read -r line; do
+		if [[ "$line" =~ ^#\ *(.*)=(.*) ]]; then			
+			key="${BASH_REMATCH[1]}"
+			value="${BASH_REMATCH[2]}"
+			REQUIRED_VARIABLES+=("$key")
+			_running3 " - Found template var: $key=${ARG_VARIABLES[$key]}"			
+		fi
+		done < "$TEMPLATE_FILE"
+
+		# Check if all required variables are defined
+		_running2 "Checking for required variables"
+		for var in "${REQUIRED_VARIABLES[@]}"; do
+			if [ -z "${ARG_VARIABLES[$var]}" ]; then
+				_error "Error: Required variable '$var' is not defined."
+				exit 1
+			else
+				_running3 " - Variable defined $var: ${ARG_VARIABLES[$var]}"
+			fi
+		done
+
+		# Apply variables to the template content
+		_running2 "Applying variables to template"
+		# Remove comments
+		TEMPLATE_CONTENT=$(sed '/^#/d' "$TEMPLATE_FILE")
+		FINAL_COMMAND=$(apply_template "$TEMPLATE_CONTENT")
+
+		# Execute the commands
+		_running2 "Final command:"
+		echo "$FINAL_COMMAND"
+		echo ""
+		echo "Proceed with the final command? [y/N]"
+		read -r response
+		
+		if [[ ! "$response" =~ ^[Yy]$ ]]; then
+			_die "Aborting"
+		else
+			# Run the template commands each new line is a command
+			while IFS= read -r line; do
+				# Check for blank line and skip
+				[ -z "$line" ] && continue
+				_running3 "============= Running: $line"
+				$0 $line
+				_running3 "============= Done"
+			done <<< "$FINAL_COMMAND"
+			
+		fi
+		exit		
 		;;
 	*)
 		help template;
 		_die "Missing sub-command"
-		;;	
+		;;
+	esac
+	;;
+
+# =================================================================================================
+# -- search
+# =================================================================================================
+search)
+	_debug "Running: cloudflare search $*"
+	CMD2=$1
+	shift
+	case "$CMD2" in
+	zone)
+		[ -z "$1" ] && { help search; _die "Missing zone name"; }
+		_running2 "Searching for zone $1"
+		zone_search "$1"
+		;;
+	zones)
+		[ -z "$1" ] && { help search; _die "Missing search term"; }
+		_running2 "Searching for zones with term $1"
+		zone_search "$1"
+		;;
+	record)
+		echo "Not implemented"
+		;;
+	*)
+		_die "Usage: cloudflare search [zone|record]"
+		;;
+	esac
+	;;
+
+# -----------------------------------------------
+# -- account
+# -----------------------------------------------
+account)
+	CMD=$1
+	shift	
+	case "$CMD" in
+	list)
+		_running "Getting list of accounts"
+		ACCOUNT_LIST_OUTPUT="Name\tID\tType\tCreated Date\n"
+		ACCOUNT_LIST_OUTPUT+=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
+		echo -e "$ACCOUNT_LIST_OUTPUT" | column -t -s $'\t'
+
+		;;
+	detail)
+		ACCOUNT_ID=$1
+		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
+		_running "Getting account details for $1"
+		call_cf_v4 GET /accounts/$1
+		;;
+	zones)
+		ACCOUNT_ID=$1
+		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
+		_running "Getting zones for account $ACCOUNT_ID"
+		ACCOUNT_ZONE_LIST="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
+		ACCOUNT_ZONE_LIST+="----\t------\t----\t--\t------------\t-------------------\n"		
+		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id=$ACCOUNT_ID -- .result %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		echo -e "$ACCOUNT_ZONE_LIST" | column -t -s $'\t'
+		;;
+	*)
+		_die "Usage: cloudflare account list"
+		;;
+	esac
+	;;
+
+# ----------------
+# -- check command
+# ----------------
+check)
+	case "$1" in
+	zone)
+		shift
+		DOMAIN="$1"
+		[ -z "$DOMAIN" ] && _die "Usage: cloudflare check zone <zone>"
+		zone_exists "$DOMAIN"
+		ZONE_ID=$(get_zone_id "$DOMAIN")
+		_running2 "Found zone id $ZONE_ID for $DOMAIN"
+		call_cf_v4 PUT /zones/$ZONE_ID/activation_check
+		;;
+	*)
+		_die "Parameters:
+   zone"
+		;;
 	esac
 	;;
 
