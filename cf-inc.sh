@@ -308,17 +308,23 @@ ${HELP_VERSION}
 
 HELP_TEMPLATE="${HELP_CMDS_SHORT}
 
-Usage: cloudflare template [list|apply <zone> <template>]
+Usage: cloudflare template [list|apply <template> -v <variable1=value1> -v <variable2=value2> ...]
 
 	Commands:
 	---------
 	list    - List available templates
-	apply   - Apply template to <zone>
+	apply   - Apply template
 
 	Options:
 	--------
-	<zone> domain zone to apply template to, see 'show zones' command
 	<template> template to apply, see 'template list' command
+	-v        variable to replace in template, see 'apply' command -v <variable1=value1> -v <variable2=value2> ...
+
+	Notes:
+	------
+	When you create your template, you can use any variables.
+	For instance, no zone is specified on the command line, it needs to be a variable in the template and you need to specify it when applying the template.
+	eg - cloudflare template apply mytemplate --variableDOMAIN_NAME=example.net
 "
 
 # -----------------------------------------------

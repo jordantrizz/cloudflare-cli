@@ -691,8 +691,8 @@ template)
 		_running "Listing templates"
 		ls -1 templates
 		;;
-	apply)		
-
+	apply)
+		_running2 "Applying template $TEMPLATE_NAME"		
 		# -- Check for template name
 		if [ -z "$TEMPLATE_NAME" ]; then
 			help template
@@ -722,7 +722,8 @@ template)
 			ARG_VARIABLES["$key"]="$value"
 			;;
 			*)
-			usage
+			echo "Unknown option: $1"
+			exit 1
 			;;
 		esac
 		shift
@@ -771,7 +772,7 @@ template)
 		_running2 "Final command:"
 		echo "$FINAL_COMMAND"
 		echo ""
-		echo "Proceed with the final command? [y/N]"
+		echo -n "Proceed with the final command? [y/N] "
 		read -r response
 		
 		if [[ ! "$response" =~ ^[Yy]$ ]]; then
@@ -782,7 +783,11 @@ template)
 				# Check for blank line and skip
 				[ -z "$line" ] && continue
 				_running3 "============= Running: $line"
-				$0 $line
+				[[ DEBUG -eq 1 ]] && echo "DEBUG: $line"
+				[[ DEBUG -eq 1 ]] && set -x
+				CMD_RUN=("$0" "$line")
+				eval "${CMD_RUN[@]}"
+				[[ DEBUG -eq 1 ]] && set +x
 				_running3 "============= Done"
 			done <<< "$FINAL_COMMAND"
 			
