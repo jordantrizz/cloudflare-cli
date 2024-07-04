@@ -381,7 +381,7 @@ delete)
 			then
 				zone_id=$prm1
 			else
-				get_zone_id "$prm1"
+				ZONE_ID=$(get_zone_id "$prm1")
 			fi
 			record_id=$prm2
 
@@ -408,7 +408,7 @@ delete)
 			esac
 		fi
 
-		call_cf_v4 DELETE /zones/$zone_id/dns_records/$record_id
+		call_cf_v4 DELETE /zones/$ZONE_ID/dns_records/$record_id
 		;;
 
 	listing)
