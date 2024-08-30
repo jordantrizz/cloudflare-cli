@@ -426,7 +426,7 @@ json_decode() {
 	_debug "json_decode: ${*}"
 
 	# shellcheck disable=SC2016
-	php -r '
+	php -d "error_reporting=E_ALL & ~E_WARNING" -r '
 		function notzero($e)
 		{
 			return $e!=0;
