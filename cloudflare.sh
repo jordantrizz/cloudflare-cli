@@ -31,10 +31,15 @@ do
 		--test) shift
 			TEST=$1;;
 		-D|--debug)
-			DEBUG=1;;
+			DEBUG=1
+			;;
+		-DF|--debug-file)
+			DEBUG_FILE=1			
+			;;
 		-DC|--debug-curl)
 			DEBUG=1
-			DEBUG_CURL_OUTPUT=1;;
+			DEBUG_CURL_OUTPUT=1
+			;;
 		-d|--detail|--detailed|--details)
 			details=1;;
 		-q|--quiet)
@@ -205,7 +210,7 @@ add)
 		case "$type" in
 		MX)
 			_running2 " -- Creating MX record: $name $content $ttl $prio"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}")
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":\"$ttl\",\"priority\":$prio}")
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'			
 			;;
 		LOC)

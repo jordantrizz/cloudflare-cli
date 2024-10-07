@@ -9,6 +9,9 @@
 # ===============================================
 VERSION=1.1.2-alpha
 DEBUG=0
+DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
+# Clear debug log
+echo "" > $DEBUG_FILE_PATH
 details=0
 QUIET=0
 NL=$'\n'
@@ -654,8 +657,13 @@ _separator () {  echo -e "${YELLOWBG}****************${ECOL}"; }
 # -----------------------------------------------
 # -- debug - ( $MESSAGE, $LEVEL)
 # -----------------------------------------------
-function _debug () {
-	local DEBUG_MSG
+function _debug () {		
+	local DEBUG_MSG="$@"
+
+	# Get previous calling function
+	local PREV_CALLER=$(caller 1)
+	local PREV_CALLER_NAME=$(echo "$PREV_CALLER" | awk '{print $2}')
+
 	if [ "$DEBUG" = "1" ]; then
 		if [[ $DEBUG_CURL_OUTPUT = "1" ]]; then
 			DEBUG_MSG+="CURL_OUTPUT: $CURL_OUTPUT_GLOBAL"
@@ -670,7 +678,12 @@ function _debug () {
 				DEBUG_MSG+="${arg}"
 			fi
 		done
-		echo -e "${CYAN}** DEBUG: ${DEBUG_MSG}${ECOL}" >&2
+		echo -e "${CYAN}** DEBUG: ${PREV_CALLER_NAME}:${DEBUG_MSG}${ECOL}" >&2
+	fi
+
+	if [[ $DEBUG_FILE == "1" ]]; then
+		DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
+		echo -e "${PREV_CALLER_NAME}:${DEBUG_MSG}" >> "$DEBUG_FILE_PATH"
 	fi
 }
 
@@ -798,7 +811,8 @@ function call_cf_v4 () {
 	shift
 
 	local FORMTYPE
-	local QUERY_STRING
+	local QUERY_STRING CURL_OUTPUT PROCESSED_OUTPUT CURL_EXIT_CODE RESULT_PAGE RESULTS_PER_PAGE CURL_OUTPUT_GLOBAL
+	local DEBUG_CURL
 	[[ -n $OVERRIDE_RESULT_PAGE ]] && RESULT_PAGE=$OVERRIDE_RESULT_PAGE || RESULT_PAGE=1
 	[[ -n $OVERRIDE_RESULTS_PER_PAGE ]] && RESULTS_PER_PAGE=$OVERRIDE_RESULTS_PER_PAGE || RESULTS_PER_PAGE=50
 	declare -a CURL_OPTS
@@ -810,18 +824,18 @@ function call_cf_v4 () {
 	# -- Check if PARAMETERS is a JSON string
 	if [ "$METHOD" != POST -o "${1:0:1}" = '{' ]; then
 		_debug "Detected JSON / GET - Setting Content-Type to application/json and FORMTYPE to data"
-		CURL_OPTS+=(-H "Content-Type: application/json")
+		CURL_OPTS+=("-H 'Content-Type: application/json'")
 		FORMTYPE=data
 	else
 		_debug "Setting FORMTYPE to form"
-		CURL_OPTS+=(-H "Content-Type: multipart/form-data")
+		CURL_OPTS+=("-H 'Content-Type: multipart/form-data'")
 		FORMTYPE=form
 	fi
 
 	# -- set method to --get if GET
     if [ "$METHOD" = GET ]
     then
-        CURL_OPTS+=(--get)
+        CURL_OPTS+=("--get")
     fi
 
 
@@ -832,7 +846,7 @@ function call_cf_v4 () {
 			_debug "Parameters: ${*}"
 			break
 		else
-			CURL_OPTS+=(--"$FORMTYPE" "$1")
+			CURL_OPTS+=("--$FORMTYPE '"$1"'")
 		fi
 		shift
 	done
@@ -844,6 +858,7 @@ function call_cf_v4 () {
 
 	# -- Testing check
 	if [[ $TEST == "true" ]]; then
+		_debug "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
 		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
 		CURL_OUTPUT_GLOBAL='{"success": true,"message": "Operation completed successfully"}'
 		return "$CURL_EXIT_CODE"
@@ -853,22 +868,21 @@ function call_cf_v4 () {
 			# Set starting page and per page options
 			QUERY_STRING="?page=$RESULT_PAGE&per_page=$RESULTS_PER_PAGE"
 
-			# Run curl command
-			_debug "CMD: curl -sS ${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING} -X $METHOD ${CURL_OPTS[*]}"
-			
+			# Run curl command			
 			if [[ $DEBUG_CURL == "1" ]]; then
 				set -x
-			fi
-				CURL_OUTPUT="$(curl -sS "${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}" \
-				-H "X-Auth-Email: $CF_ACCOUNT"\
-				-H "X-Auth-Key: $CF_TOKEN" \
-				-X "$METHOD" \
-				"${CURL_OPTS[@]}" \
-				)"
+			fi				
+            	CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X \"$METHOD\""
+				# Grab each CURL_OPTS and add to CURL_CMD
+				for i in "${CURL_OPTS[@]}"; do
+					CURL_CMD+=" $i"
+				done
+				_debug "CURL_CMD: $CURL_CMD"
+
 			if [[ $DEBUG_CURL == "1" ]]; then
 				set +x
-			fi 
-					
+			fi
+			CURL_OUTPUT=$(eval $CURL_CMD)		
 			CURL_EXIT_CODE=$?
 			_debug "CURL_OUTPUT: $CURL_OUTPUT" 2
 			_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
@@ -1032,7 +1046,7 @@ function zone_exists () {
 	_debug_all "func zone_exists: ${*}"
 	local ZONE="$1"
 	
-	get_zone_id "$ZONE"
+	ZONE_ID=$(get_zone_id "$ZONE")
 	if [[ $? -ge 1 ]]; then
 		_die "Zone does not exist - $ZONE"		
 	else
