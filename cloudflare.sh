@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-
-# ---
-# cloudflare-cli v1.0.1
-# ---
-
-# -------------------------------------------------- #
+# =====================================
 # -- Variables
-# -------------------------------------------------- #
-VERSION=1.1.2-alpha
+# =====================================
+VERSION=$(cat VERSION)
 DEBUG=0
 details=0
 quiet=0
 NL=$'\n'
 TA=$'\t'
 CF_API_ENDPOINT=https://api.cloudflare.com/client/v4
+API_URL="https://api.cloudflare.com"
 APIv4_ENDPOINT=$CF_API_ENDPOINT # Remove eventually
 
 # -- Colors
@@ -72,14 +68,14 @@ Commands:
    help       - Full help
 
 Environment variables:
-	CF_ACCOUNT  -  email address (as -E option)
-	CF_TOKEN    -  API token (as -T option)
+	CF_ACCOUNT  -  email address (as --cf-account option)
+	CF_KEY    -  API key (as --cf-key option)
 
 Configuration file for credentials:
-	Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
+	Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_KEY defined.
 
 	CF_ACCOUNT=example@example.com
-	CF_TOKEN=<token>
+	CF_KEY=<api-key>
 
 ${HELP_EXAMPLES}
 
@@ -103,7 +99,7 @@ HELP_OPTIONS=\
 "Options:
 
    --details, -d    Display detailed info where possible
-   --debug, -D      Display API debugging info
+   --debug, -D      Debugging
    --quiet, -q      Less verbose
    -E <email>
    -T <api_token>"
@@ -192,32 +188,33 @@ ${HELP_VERSION}"
 
 # -- help
 HELP () {
-cmd1=$1
-shift
-	case "$cmd1" in
-		# -- usage
-		usage|USAGE)
-		echo "$HELP_USAGE"
-		;;
+	_debug "Running help function - $@"
+	cmd1=$1
+	shift
+		case "$cmd1" in
+			# -- usage
+			usage|USAGE)
+			echo "$HELP_USAGE"
+			;;
 
-		# -- help
-		help|HELP)
-		echo "$HELP"
-		;;
+			# -- help
+			help|HELP)
+			echo "$HELP"
+			;;
 
-		# -- add
-		add)
-			cmd2="$2"
-			case "$cmd2" in	
-				record)
-				echo "$HELP_ADD_RECORD"
-				;;
-			esac		
-		;;
-		show)
-			echo "$HELP_SHOW"
-			;;			
-esac
+			# -- add
+			add)				
+				cmd2="$1"
+				case "$cmd2" in	
+					record)
+					echo "$HELP_ADD_RECORD"
+					;;
+				esac		
+			;;
+			show)
+				echo "$HELP_SHOW"
+				;;			
+	esac
 }
 
 # ----------------------
@@ -245,7 +242,8 @@ _separator () {
 
 _debug () {
     if [ $DEBUG == "1" ]; then
-        echo -e "${CYAN}** DEBUG: $@${ECOL}"
+		# Echo to stderr
+		echo -e "${CYAN}DEBUG: $@${ECOL}" >&2		
     fi
 }
 
@@ -271,14 +269,59 @@ is_quiet() { [ "$quiet" = 1 ]; }
 is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
+# =====================================
+# -- _cf_api <$REQUEST> <$API_PATH>
+# -- Returns: $API_OUTPUT (json)
+# =====================================
+function _cf_api() {
+    # -- Run cf_api with tokens
+    _debug "function:${FUNCNAME[0]}"
+    _debug "Running cf_api() with ${*}"
+
+	CURL_HEADERS=("-H" "X-Auth-Key: ${CF_KEY}" -H "X-Auth-Email: ${CF_ACCOUNT}")
+	_debug "Using \$API_APIKEY as X-Auth-Key. \$CURL_HEADERS: ${CURL_HEADERS[*]}"
+	REQUEST="$1"
+	API_PATH="$2"
+	CURL_OUTPUT=$(mktemp)
+
+
+    _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}""
+    [[ $DEBUG == "1" ]] && set -x
+    CURL_EXIT_CODE=$(curl -s -w "%{http_code}" --request "$REQUEST" \
+        --url "${API_URL}${API_PATH}" \
+        "${CURL_HEADERS[@]}" \
+        --output "$CURL_OUTPUT" "${EXTRA[@]}")
+    [[ $DEBUG == "1" ]] && set +x
+    API_OUTPUT=$(<"$CURL_OUTPUT")
+    _debug "CURL_EXIT_CODE: $CURL_EXIT_CODE API_OUTPUT: $API_OUTPUT"	
+    rm "$CURL_OUTPUT"
+
+	# Return both the JSON output and curl code
+    echo "$API_OUTPUT"
+    return $CURL_EXIT_CODE
+}
+
+# =====================================
+# -- parse_cf_error $API_OUTPUT
+# =====================================
+parse_cf_error () {
+    API_OUTPUT=$1
+    _debug "Running parse_cf_error"
+    ERROR_CODE=$(echo $API_OUTPUT | jq -r '.errors[0].code')
+    ERROR_MESSAGE=$(echo $API_OUTPUT | jq -r '.errors[0].message')
+    _error "Error: $ERROR_CODE - $ERROR_MESSAGE"
+}
+
+# =====================================
 # -- CURL_CF - New Cloudflare api call
 # 
 # Invocation - CURL_CF <METHOD> <PATH> [PARAMETERS] [-- JSON_DECODER-ARGS]
 # Example - call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers
-# ---------------------------------------------------------------------------
+# =====================================
 CURL_CF() {
+	_debug "Running CURL_CF $@"
 	# Variables
-	local CURL_METHOD API_PATH FORMTYPE EXITCODE QUERYSTRING PAGE PER_PAGE 
+	local CURL_METHOD API_PATH FORMTYPE QUERYSTRING PAGE PER_PAGE 
 	declare -a CURL_OPTS
 	CURL_OPTS=()
 	
@@ -334,17 +377,22 @@ CURL_CF() {
 #            echo "<<< curl -X $CURL_METHOD ${CURL_OPTS[*]} ${CF_API_ENDPOINT}${API_API_PATH}${QUERYSTRING}" >&2
 #        fi
 
-#		if [[ $DEBUG == "1" ]];then set -x;fi			
-        CURL_OUTPUT=$(curl -sS -H "X-Auth-Email: ${CF_ACCOUNT}" \
-        					-H "X-Auth-Key: ${CF_TOKEN}" \
+		if [[ $DEBUG == "1" ]];then set -x;fi			
+        CURL_OUTPUT_RAW=$(curl -sS -H "X-Auth-Email: ${CF_ACCOUNT}" \
+        					-H "X-Auth-Key: ${CF_KEY}" \
         					-X "${CURL_METHOD}" \
         					"${CURL_OPTS[@]}" \
-            				"${CF_API_ENDPOINT}${API_PATH}${QUERYSTRING}" | json_decode "$@")
-#        if [[ $DEBUG == "1" ]];then set +x;fi
+            				"${CF_API_ENDPOINT}${API_PATH}${QUERYSTRING}")
+        if [[ $DEBUG == "1" ]];then set +x;fi
+		_debug "json_decude: $@"
 
-        EXIT_CODE=$?
-#        _debug "Curl OUTPUT: $CURL_OUTPUT"
-        _debug "Exit Code: $EXIT_CODE"
+		CURL_OUTPUT=$(echo $CURL_OUTPUT_RAW | json_decode "$@")
+
+        CURL_EXIT_CODE=$?
+        _debug "Curl Exit Code: $CURL_EXIT_CODE"
+		if [[ $CURL_EXIT_CODE -ne 0 ]]; then		
+			exit 1
+		fi
 
         sed -e '/^!/d' <<<"$CURL_OUTPUT"
 
@@ -356,12 +404,15 @@ CURL_CF() {
             break
         fi
     done
-    return $EXIT_CODE	
+    echo $CURL_OUTPUT
 }
 
-# -- call_cf_v4 - Main call to cloudflare using curl
-call_cf_v4() {
-	# Invocation: call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+# =====================================
+# -- call_cf_v4 <METHOD> <PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+# -- Main call to cloudflare using curl
+# =====================================
+function call_cf_v4() {
+	_debug "Running call_cf_v4 $@"
 	local method path formtype exitcode querystring page per_page
 	declare -a curl_opts
 	curl_opts=()
@@ -407,9 +458,9 @@ call_cf_v4() {
 		if is_debug
 		then
 			echo "<<< curl -X $method ${curl_opts[*]} $APIv4_ENDPOINT$path$querystring" >&2
-		fi
+		fi		
 		
-		output=`curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_TOKEN" \
+		output=`curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_KEY" \
 			-X "$method" "${curl_opts[@]}" \
 			"$APIv4_ENDPOINT$path$querystring" | json_decode "$@"`
 		exitcode=$?
@@ -755,29 +806,43 @@ findout_record() {
 	return 0
 }
 
+# =====================================
 # -- get_zone_id - get Cloudflare zone id
-get_zone_id()
-{
-	zone_id=`call_cf_v4 GET /zones name="$1" -- .result ,id`
-	if [ -z "$zone_id" ]
-	then
-		_error "No such DNS zone found"
-		_die
+# =====================================
+function get_zone_id() {
+	DOMAIN=$1
+	_debug "Getting zone id for $1"
+	API_OUTPUT=$(_cf_api GET "/client/v4/zones?name=$DOMAIN")
+	local CURL_EXIT_CODE=$?
+
+	if [[ $CURL_EXIT_CODE == "200" ]]; then
+		_debug "Success from API: $CURL_EXIT_CODE"
+	else
+		_debug "Error from API"
+		_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE API_OUTPUT: $API_OUTPUT"
+		_debug "CF Error: $(parse_cf_error "$API_OUTPUT")"
+		_die "Error getting zone id for $DOMAIN"
 	fi
+	ZONE_ID=$(echo $API_OUTPUT | jq -r '.result[0].id')
+	_debug "Zone ID: $ZONE_ID"
+	echo $ZONE_ID
 }
 
-# ------------
+
+# =============================================================================
+# =============================================================================
 # -- Main loop
-# ------------
+# =============================================================================
+# =============================================================================
 
 # -- Check for options
 while [ -n "$1" ]
 do
 	case "$1" in
-	-E)	shift
+	--cf-email)	shift
 		CF_ACCOUNT=$1;;
-	-T)	shift
-		CF_TOKEN=$1;;
+	--cf-key)	shift
+		CF_KEY=$1;;
 	-D|--debug)
 		DEBUG=1;;
 	-d|--detail|--detailed|--details)
@@ -796,8 +861,14 @@ do
 	shift
 done
 
-# -- Check for .cloudflare credentials
+if [[ $DEBUG == "1" ]]; then
+	_debug "Debugging is on"
+fi
 
+# =====================================
+# -- Check for .cloudflare credentials
+# =====================================
+_debug "Checking for cloudflare credentials"
 if [ ! -f "$HOME/.cloudflare" ]
 	then
 		echo "No .cloudflare file."
@@ -807,28 +878,26 @@ if [ ! -f "$HOME/.cloudflare" ]
 		HELP usage
 		_die
 	fi
-	if [ -z "$CF_TOKEN" ]
+	if [ -z "$CF_KEY" ]
 	then
-		_error "No \$CF_TOKEN set."
+		_error "No \$CF_KEY set."
 		HELP usage
 		_die		
 	fi
 else
-	if is_debug; then echo "Found .cloudflare file."; fi
+	if is_debug; then _running "Found .cloudflare file."; fi
 	source $HOME/.cloudflare
-	if is_debug; then echo "Sourced CF_ACCOUNT: $CF_ACCOUNT CF_TOKEN: $CF_TOKEN"; fi
+	_debug "Sourced CF_ACCOUNT: $CF_ACCOUNT CF_KEY: $CF_KEY"
 	
         if [ -z "$CF_ACCOUNT" ]
         then
-                _error "No \$CF_ACCOUNT set in config."
-                HELP usage                
-				_die
+			HELP usage
+			_die "No \$CF_ACCOUNT set in config."
         fi
-        if [ -z "$CF_TOKEN" ]
+        if [ -z "$CF_KEY" ]
         then
-                _error "No \$CF_TOKEN set in config.
-
-        $USAGE"
+		    HELP usage
+			_die "No \$CF_KEY set in config."
         fi
 fi
 
@@ -868,7 +937,7 @@ show|list)
 
 	# -- settings
 	setting|settings)
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 settings <zone>"
+		[ -z "$1" ] && _die "Usage: cloudflare $CMD1 settings <zone>"
 		if is_hex "$1"
 		then
 			zone_id=$1
@@ -922,7 +991,7 @@ add)
 	shift
 	case "$CMD2" in
 	record)
-		[ $# -lt 4 ] && _error "Missing arguments"; HELP add record;
+		[ $# -lt 4 ] && { HELP add record ; _die "Missing arguments - $CMD1"; }
 		
 		zone=$1
 		shift
@@ -946,7 +1015,7 @@ add)
 		[ -n "$ttl" ] || ttl=1
 		[ -n "$prio" ] || prio=10
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
-		get_zone_id "$zone"
+		zone_id=$(get_zone_id "$zone")
 		
 		
 		case "$type" in
@@ -1032,7 +1101,7 @@ add)
 		then
 			trg_type=country
 		fi
-		[ -z "$trg" -o -z "$trg_type" ] && die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
+		[ -z "$trg" -o -z "$trg_type" ] && _die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
 		
 		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
 		;;
@@ -1040,13 +1109,13 @@ add)
 	zone)
 		if [ $# != 1 ]
 		then
-			die "Usage: cloudflare add zone <name>"
+			_die "Usage: cloudflare add zone <name>"
 		fi
 		call_cf_v4 POST /zones "{\"name\":\"$1\",\"jump_start\":true}" -- .result '&<"status: $status"'
 		;;
 		
 	*)
-		die "Parameters:
+		_die "Parameters:
    zone, record, whitelist, blacklist, challenge"
 	esac
 	;;
@@ -1068,7 +1137,7 @@ delete)
 		then
 			if [ -n "$1" ]
 			then
-				die "Unknown parameters: $@"
+				_die "Unknown parameters: $@"
 			fi
 			if is_hex "$prm1"
 			then
@@ -1082,7 +1151,7 @@ delete)
 			record_type=''
 			first_match=0
 			
-			[ -z "$prm1" ] && die "Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]"
+			[ -z "$prm1" ] && _die "Usage: cloudflare delete record [<record-name> [<record-type> | first] | [<zone-name>|<zone-id>] <record-id>]"
 			
 			if [ "$prm2" = first ]
 			then
@@ -1094,10 +1163,10 @@ delete)
 			findout_record "$prm1" "$record_type" "$first_match"
 			case $? in
 			0)	true;;
-			2)	die "No suitable DNS zone found for \`$prm1'";;
-			3)	die "DNS record \`$prm1' not found";;
-			4)	die "Ambiguous record spec: \`$prm1'";;
-			*)	die "Internal error";;
+			2)	_die "No suitable DNS zone found for \`$prm1'";;
+			3)	_die "DNS record \`$prm1' not found";;
+			4)	_die "Ambiguous record spec: \`$prm1'";;
+			*)	_die "Internal error";;
 			esac
 		fi
 		
