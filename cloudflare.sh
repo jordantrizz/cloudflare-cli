@@ -2,7 +2,8 @@
 # =====================================
 # -- Variables
 # =====================================
-VERSION=$(cat VERSION)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+VERSION=$(cat $SCRIPT_DIR/VERSION)
 DEBUG=0
 details=0
 quiet=0
@@ -459,11 +460,14 @@ function call_cf_v4() {
 		then
 			echo "<<< curl -X $method ${curl_opts[*]} $APIv4_ENDPOINT$path$querystring" >&2
 		fi		
-		
+		[[ $DEBUG == "1" ]] && set -x
 		output=`curl -sS -H "X-Auth-Email: $CF_ACCOUNT" -H "X-Auth-Key: $CF_KEY" \
 			-X "$method" "${curl_opts[@]}" \
-			"$APIv4_ENDPOINT$path$querystring" | json_decode "$@"`
+			"$APIv4_ENDPOINT$path$querystring"`
 		exitcode=$?
+		[[ $DEBUG == "1" ]] && set +x
+		output=`json_decode "$@" <<<"$output"`
+		
 		sed -e '/^!/d' <<<"$output"
 		
 		if grep -qE '^!has_more' <<<"$output"
@@ -719,7 +723,7 @@ json_decode()
 # -- findout_record
 #
 # Arguments:
-#   $1 - record name (eg: sub.example.com)
+#  $1 - record name (eg: sub.example.com)
 #  $2 - record type, optional (eg: CNAME)
 #  $3 - 0/1, stop searching at first match, optional
 #  $4 - record content to match to
@@ -907,8 +911,8 @@ if [ -z "$1" ]; then
 	_die "Missing arguments" 1
 fi
 
-
 # -- run commands
+_debug "cmd: $@"
 CMD1=$1
 shift
 
@@ -956,13 +960,12 @@ show|list)
 	# -- record
 	record|records)
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
-		if is_hex "$1"
-		then
-			zone_id=$1
+		if is_hex "$1"; then
+			ZONE_ID=$1
 		else
-			get_zone_id "$1"
+			ZONE_ID=$(get_zone_id "$1")
 		fi
-		call_cf_v4 GET /zones/$zone_id/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
+		call_cf_v4 GET /zones/${ZONE_ID}/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
 			',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		;;
 
@@ -986,7 +989,7 @@ show|list)
 # -------------------
 # -- add command @ADD
 # -------------------
-add)
+add)	
 	CMD2=$1
 	shift
 	case "$CMD2" in
@@ -1001,6 +1004,7 @@ add)
 		shift
 		content=$1
 		ttl=$2
+		[[ $ttl == "auto" ]] && ttl=0
 		if [[ "$type" == "A" ]] || [[ "$type" == "CNAME" ]]; then
 			proxied=$3
 		elif [[ "$type" == "MX" ]] || [[ "$type" == "SRV" ]]; then
@@ -1069,7 +1073,12 @@ add)
 			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
 			;;
 		A)
-			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			CURL_CF POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			if [[ $? == 0 ]]; then
+				_succes "Record added successfully - $zone $type $name $content $ttl $proxied"				
+			else
+				echo "Error adding record"
+			fi
 			;;
 		CNAME)
 			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
@@ -1079,6 +1088,7 @@ add)
 			;;
 		esac
 		;;
+
 		
 	whitelist|blacklist|block|challenge)
 		trg=$1
