@@ -518,7 +518,7 @@ json_decode()
 	# key
 	#    represent the value
 	
-	php -r '
+	php -d error_reporting=E_ALL\&~E_WARNING -r '
 		function notzero($e)
 		{
 			return $e!=0;
