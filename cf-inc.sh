@@ -721,9 +721,9 @@ function _escape_string () {
 # -- Check Functions
 # ==============================================================================================
 
-# -----------------------------------------------
+# ===============================================
 # -- _check_bash - check version of bash
-# -----------------------------------------------
+# ===============================================
 function _check_bash () {
 	# - Check bash version and _die if not at least 4.0
 	if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
@@ -731,9 +731,9 @@ function _check_bash () {
 	fi
 }
 
-# -----------------------------------------------
+# ===============================================
 # -- _check_cloudflare_credentials
-# -----------------------------------------------
+# ===============================================
 _check_cloudflare_credentials () {
 	_debug "Checking for .cloudflare credentials"
 	if [ ! -f "$HOME/.cloudflare" ]
@@ -772,9 +772,9 @@ _check_cloudflare_credentials () {
 	fi
 }
 
-# -----------------------------------------------
+# ===============================================
 # -- _check_debug
-# -----------------------------------------------
+# ===============================================
 function _check_debug () {
 	if [[ $DEBUG == "1" ]]; then
 		echo -e "${CYAN}** DEBUG: Debugging is on${ECOL}"
@@ -783,13 +783,29 @@ function _check_debug () {
 	fi
 }
 
-# -----------------------------------------------
+# ===============================================
 # -- _check_quiet
-# -----------------------------------------------
+# ===============================================
 function _check_quiet () {
     if [[ $QUIET == "1" ]]; then
         echo -e "${CYAN}** DEBUG: Quiet is on${ECOL}"
     fi
+}
+
+# ===============================================
+# -- _check_required
+# ===============================================
+function _check_required () {
+	# -- Variable of required commands
+	local REQUIRED_COMMANDS=(jq curl)
+
+	# -- Check if required commands are installed
+	for i in "${REQUIRED_COMMANDS[@]}"; do
+		if ! command -v "$i" &>/dev/null; then
+			_error "$i is required but it's not installed. Aborting."
+			exit 1
+		fi
+	done
 }
 
 # ==============================================================================================
@@ -1095,4 +1111,18 @@ function zone_search () {
 	else
 		_error "Zone not found - $QUERY"
 	fi
+}
+
+# ===============================================
+# -- _cf_create_tenant $TENANT_NAME $ACCOUNT_ID
+# -- Create a tenant
+# ===============================================
+function () {
+	_debug_all "func : ${*}"
+	local TENANT_NAME="$1" ACCOUNT_ID="$2"
+
+	# -- Create Tenant
+	_debug "Creating tenant - $TENANT_NAME"
+	call_cf_v4 POST /client/v4/accounts "$TENANT_NAME" -- .result ,id
+
 }
