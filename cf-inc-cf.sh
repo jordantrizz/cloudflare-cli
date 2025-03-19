@@ -735,7 +735,7 @@ function _check_quiet () {
 # -- Example: call_cf_v4 GET /zones name="$zone" -- .result ,id
 # ===============================================
 function call_cf_v4 () {
-	_debug_all "call_cf_v4: ${*} EOF"
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	local METHOD="${1^^}"
 	shift	
 	local URL_PATH="$1"
@@ -947,7 +947,7 @@ findout_record() {
 # -- Arguments:	$1 - zone name
 # ===============================================
 function get_zone_id () {
-	_debug_all "func get_zone_id: ${*}"
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	local ZONE_ID ZONE=$1 CLI_ZONE=$1	
 		
 	# -- Checking if zone is an ID or nam
@@ -974,7 +974,7 @@ function get_zone_id () {
 # -- Arguments:	$1 - zone name
 # ===============================================
 function zone_exists () {
-	_debug_all "func zone_exists: ${*}"
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	local ZONE="$1"
 	
 	ZONE_ID=$(get_zone_id "$ZONE")
@@ -992,7 +992,7 @@ function zone_exists () {
 # -- Arguments:	$1 - query
 # ===============================================
 function zone_search () {
-	_debug_all "func zone_search: ${*}"
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	local QUERY="$1" SEARCH_ZONE_OUTPUT SUCCESS="0" ZONES_FOUND=""
 
 	# Get a list of all domains and put it into an array.

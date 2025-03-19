@@ -88,6 +88,7 @@ function cf_api() {
     # Set pagination parameters
     REQUEST="${args[0]}"
     API_PATH="${args[1]}"
+    EXTRA=("${args[@]:2}")
 
     # Add pagination parameters if needed
     if [[ $PAGINATE -eq 1 ]]; then
@@ -114,7 +115,7 @@ function cf_api() {
     CURL_OUTPUT=$(mktemp)
 
     # -- Start API Call
-    _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}""
+    _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}" --output $CURL_OUTPUT ${EXTRA[*]}"
     [[ $DEBUG == "1" ]] && set -x
     CURL_EXIT_CODE=$(curl -s -w "%{http_code}" --request "$REQUEST" \
         --url "${API_URL}${API_PATH}" \
@@ -232,6 +233,10 @@ function get_zone_id () {
 # -- Get domain zoneid
 # =====================================
 cf_api_functions[get_zone_idv2]="Get domain zoneid"
+function _cf_zone_getid () {
+    get_zone_idv2 $1
+}
+
 function get_zone_idv2 () {    
     DOMAIN_NAME=$1
     [[ -z $DOMAIN_NAME ]] && _error "Missing domain name" && exit 1
@@ -315,26 +320,271 @@ CF_GET_ZONEID () {
 }
 
 # =====================================
-# -- _cf_tenant_zone_create $TENANT_ID $DOMAIN
+# -- _cf_zone_create $ACCOUNT_ID $DOMAIN $SCAN
+# -- Create zone under account
 # =====================================
-cf_api_functions[_cf_tenant_zone_create]="Create tenant zone"
-function _cf_tenant_zone_create () {
-    local TENANT_ID=$1
+cf_api_functions[_cf_zone_create]="Create zone under account"
+function _cf_zone_create () {
+    local ACCOUNT_ID=$1
     local DOMAIN=$2
-    _debug "Creating zone $DOMAIN for tenant $TENANT_ID"
-    cf_api POST /client/v4/zones \
+    local SCAN=$3
+    
+    _debug "Creating zone $DOMAIN for tenant $ACCOUNT_ID with scan $SCAN"
+    cf_api POST /client/v4/zones/ \
     -H "Content-Type: application/json" \
     -d '{
         "name": "'"$DOMAIN"'",
         "account": {
-            "id": "'"$TENANT_ID"'"
+            "id": "'"$ACCOUNT_ID"'"            
         }
     }'
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        DOMAIN_ID=$(echo $API_OUTPUT | jq -r '.result.id')
+        # -- Name Servers are in an array, separate by ;
+        NAME_SERVERS=$(echo $API_OUTPUT | jq -r '.result.name_servers[]' | tr '\n' ';')
+        _success "Zone $DOMAIN created with ID $DOMAIN_ID and Name Servers: $NAME_SERVERS"
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        return 1
+    fi
 
-    # -- Get Domain ID
-    DOMAIN_ID=$(echo $API_OUTPUT | jq -r '.result.id')
-    _success "Zone $DOMAIN created with ID $DOMAIN_ID"
-    _quiet "$DOMAIN_ID"
+    # -- Scan zone
+    if [[ $SCAN == "true" ]]; then
+        _cf_zone_scan $DOMAIN_ID
+    else
+        _warning "Skipping zone scan"
+    fi    
+    _quiet "$DOMAIN,$DOMAIN_ID,$NAME_SERVERS,$SCAN"
+    return 0
+}
+
+# =====================================
+# -- _cf_zone_scan $DOMAIN_ID
+# =====================================
+cf_api_functions[_cf_zone_scan]="Scan zone"
+function _cf_zone_scan () {
+    local DOMAIN_ID=$1
+
+    # -- Check if DOMAIN_ID is a domain or ID
+    if [[ $DOMAIN_ID == *"."* ]]; then
+        _debug "Getting zone ID for $DOMAIN_ID"
+        DOMAIN_ID=$(_cf_zone_getid $DOMAIN_ID)
+    fi
+    
+    cf_api POST /client/v4/zones/$DOMAIN_ID/dns_records/scan
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        _success "Zone $DOMAIN_ID scanned"
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        return 1
+    fi
+}
+
+# =====================================
+# -- _cf_zone_create_bulk $FILE
+# =====================================
+cf_api_functions[_cf_zone_create_bulk]="Create zone in bulk"
+function _cf_zone_create_bulk () {
+    _debug "Creating zones in bulk"
+    local FILE=$1
+    local TMP_FILE="/tmp/zones.tmp"
+    local COUNT=0
+
+    # -- Confirm
+    _running2 "Creating zones in bulk"
+    echo "===================================="
+    echo "File: $FILE"
+    cat $FILE
+    echo "===================================="
+    read -p "Are you sure you want to create zones in bulk? (y|n) " yn
+    case $yn in
+        [Yy]* )
+        ;;
+        [Nn]* ) exit;;
+        * ) echo "Please answer yes or no.";;
+    esac
+    # -- Ingest file account_id,domain,scan
+    BULK_OUTPUT=""
+    while IFS=, read -r DOMAIN ACCOUNT_ID SCAN; do
+        # -- Check if line is blank
+        if [[ -z $ACCOUNT_ID ]] || [[ -z $DOMAIN ]] || [[ -z $SCAN ]]; then
+            _warning "Blank line found in file"
+            continue
+        fi
+        _running "Creating zone $DOMAIN for account $ACCOUNT_ID with scan $SCAN"
+        _debug "DOMAIN: $DOMAIN - ACCOUNT_ID: $ACCOUNT_ID - SCAN: $SCAN"
+        QUIET="1"
+        CREATE_DATA="$(_cf_zone_create $ACCOUNT_ID $DOMAIN $SCAN)"
+        CREATE_DATA_EXIT="$?"
+        QUIET="0"
+        if [[ $CREATE_DATA_EXIT -ne 0 ]]; then
+            _error "Error creating zone $DOMAIN"
+            continue
+        else
+            BULK_OUTPUT+="$CREATE_DATA\n"
+            COUNT=$((COUNT+1))
+        fi
+    done < $FILE
+    _success "Created $COUNT zones"
+    echo -e $BULK_OUTPUT
+    echo -e $BULK_OUTPUT > $TMP_FILE
+    _success "Output written to $TMP_FILE"
+}
+
+# =====================================
+# -- _cf_zone_list $ACCOUNT_ID
+# =====================================
+cf_api_functions[_cf_zone_list]="List all zones"
+function _cf_zone_list () {
+    _debug "function:${FUNCNAME[0]} - ${*}"
+    local ACCOUNT_ID=$1
+
+    _debug "Listing all zones"
+    cf_api GET /client/v4/zones?account.id=$ACCOUNT_ID
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        ZONES=$(echo $API_OUTPUT | jq -r '.result[] | "\(.id) \(.name)"')
+        echo $ZONES
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        exit 1
+    fi
+}
+
+# =====================================
+# -- _cf_zone_get $ZONE_ID
+# =====================================
+cf_api_functions[_cf_zone_get]="Get zone"
+function _cf_zone_get () {
+    local ZONE_ID=$1
+    local PRINT=$2
+    
+    [[ -z $PRINT ]] && PRINT="summary"
+    if [[ $PRINT == "summary" ]]; then
+        JQ_FILTER="jq '.result | {id: .id, name: .name, status: .status, type: .type, name_servers: .name_servers, account: .account.name, account_id: .account.id, created_on: .created_on, modified_on: .modified_on, tenant: .tenant, account: .account }'"
+    elif [[ $PRINT == "export" ]]; then
+        JQ_FILTER="jq -r '[.result | .name, .id, (.name_servers | join(\";\"))] | join(\",\")'"
+    elif [[ $PRINT == "full" ]]; then
+        JQ_FILTER="jq"
+    else
+        _error "Invalid print option"
+        exit 1
+    fi
+
+    # -- Check if ZONE_ID is a domain or ID
+    if [[ $ZONE_ID == *"."* ]]; then
+        _debug "Getting zone ID for $ZONE_ID"
+        ZONE_ID=$(_cf_zone_getid $ZONE_ID)
+    fi
+
+    _debug "Getting zone $ZONE_ID"
+    cf_api GET /client/v4/zones/$ZONE_ID
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        echo $API_OUTPUT | eval "$JQ_FILTER"
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        exit 1
+    fi
+}
+
+# =====================================
+# -- _cf_zone_delete $ZONE_ID
+# =====================================
+cf_api_functions[_cf_zone_delete]="Delete zone"
+function _cf_zone_delete () {
+    local ZONE_ID=$1
+    _debug "Deleting zone $ZONE_ID"
+    # -- Sure?
+    read -p "Are you sure you want to delete zone $ZONE_ID? (y|n) " yn
+    case $yn in
+        [Yy]* )
+        ;;
+        [Nn]* ) exit;;
+        * ) echo "Please answer yes or no.";;
+    esac
+
+    cf_api DELETE /client/v4/zones/$ZONE_ID
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        _success "Zone $ZONE_ID deleted"
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        exit 1
+    fi
+}
+
+# =====================================
+# -- _cf_zone_count_records $ZONE_ID
+# =====================================
+cf_api_functions[_cf_zone_count_records]="Count zone records"
+function _cf_zone_count_records () {
+    local ZONE_ID=$1
+
+    # -- Check if zone is a domain or id
+    if [[ $ZONE_ID == *"."* ]]; then
+        _debug "Getting zone ID for $ZONE_ID"
+        ZONE_ID=$(_cf_zone_getid $ZONE_ID)
+    fi
+
+    _debug "Counting records for zone $ZONE_ID"
+    cf_api GET /client/v4/zones/$ZONE_ID/dns_records
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        RECORD_COUNT=$(echo $API_OUTPUT | jq -r '.result_info.count')
+        _success "Total records: $RECORD_COUNT"
+        _quiet "$RECORD_COUNT"
+    else
+        _error "ERROR: $MESG - $API_OUTPUT"
+        exit 1
+    fi
+}
+
+# =====================================
+# -- _cf_zone_count_records_bulk $FILE
+# -- Count records in bulk
+# =====================================
+cf_api_functions[_cf_zone_count_records_bulk]="Count records in bulk"
+function _cf_zone_count_records_bulk () {
+    local FILE=$1
+    local TMP_FILE="/tmp/records.tmp"
+    local COUNT=0
+
+    # -- Confirm
+    _running2 "Counting records in bulk"
+    echo "===================================="
+    echo "File: $FILE"
+    cat $FILE
+    echo "===================================="
+    read -p "Are you sure you want to count records in bulk? (y|n) " yn
+    case $yn in
+        [Yy]* )
+        ;;
+        [Nn]* ) exit;;
+        * ) echo "Please answer yes or no.";;
+    esac
+    # -- Ingest file domain.com
+    BULK_OUTPUT=""
+    while IFS=, read -r DOMAIN; do
+        # -- Check if line is blank
+        if [[ -z $DOMAIN ]]; then
+            _warning "Blank line found in file"
+            continue
+        fi
+        _running "Counting records for zone $DOMAIN"
+        _debug "DOMAIN: $DOMAIN"
+        QUIET="1"
+        RECORD_COUNT="$(_cf_zone_count_records $DOMAIN)"
+        RECORD_COUNT_EXIT="$?"
+        QUIET="0"
+        if [[ $RECORD_COUNT_EXIT -ne 0 ]]; then
+            _error "Error counting records for $DOMAIN"
+            continue
+        else
+            BULK_OUTPUT+="$DOMAIN,$RECORD_COUNT\n"
+            COUNT=$((COUNT+1))
+        fi
+    done < $FILE
+    _success "Counted records for $COUNT zones"
+    echo -e $BULK_OUTPUT
+    echo -e $BULK_OUTPUT > $TMP_FILE
+    _success "Output written to $TMP_FILE"
 }
 
 
@@ -973,11 +1223,11 @@ function _cf_tenant_create_bulk () {
     QUIET="1"
     while IFS= read -r LINE; do
         _debug "Creating tenant - $LINE"        
-        TENANT_ID="$(_cf_tenant_create $LINE)"
+        TENANT_ID="$(_cf_tenant_create "$LINE")"
         echo "\"$LINE\",$TENANT_ID"
         TENANT_IDS_CREATED+="\"$LINE\",$TENANT_ID\n"
         COUNT=$((COUNT+1))
-        sleep 2
+        sleep 1
     done < $FILE
     QUIET="0"
 

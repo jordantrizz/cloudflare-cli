@@ -44,11 +44,14 @@ function _cf_partner_help () {
     echo "  delete <id>,<id>                             - Delete tenant, or multiple separated by ,"
     echo
     _running "Zone Commands:"
-    echo "  create-zone <tenant-id> <domain>             - Create a new zone for tenant"
+    echo "  create-zone <tenant-id> <domain> <scan>      - Create a new zone for tenant"
     echo "  create-zone-bulk <file>                      - Create zones in bulk"
-    echo "  list-zones <tenant-id>                        - List all zones for tenant"
-    echo "  get-zone <tenant-id> <zone-id>                - Get zone details"
-    echo "  delete-zone <tenant-id> <zone-id>             - Delete zone"
+    echo "  scan-zone <zone-id>                          - Scan zone DNS records"
+    echo "  list-zones <tenant-id>                       - List all zones for tenant"
+    echo "  get-zone <zone-id>                           - Get zone details"
+    echo "  delete-zone <zone-id>                        - Delete zone"
+    echo "  count-zone-records <zone-id>                 - Count zone records"
+    echo "  count-zone-records-bulk <file>               - Count zone records in bulk"
     echo
     _running "Access Commands:"
     echo "  add-access <tenant-id> <email> <role>        - Create a new access for tenant"
@@ -61,6 +64,7 @@ function _cf_partner_help () {
     echo "  -q, --quiet            Suppress output"
     echo "  -d, --debug            Show debug output"
     echo "  --cf                   List Core function"
+    echo "  -j, --json             Output as JSON"
 }
 
 # ==============================================================================================
@@ -96,7 +100,11 @@ _debug "ALL_ARGS: ${*}@"
         --cf)
         _list_core_functions
         exit 0
-        ;;        
+        ;;
+        -j|--json)
+        JSON="1"
+        shift # past argument
+        ;;
         *)    # unknown option
         POSITIONAL+=("$1") # save it in an array for later
         shift # past argument
@@ -189,10 +197,76 @@ elif [[ $CMD == "create-zone" ]]; then
     _debug "Command: create-zone"
     TENANT_ID=$1
     DOMAIN=$2
+    SCAN=$3
+    [[ -z $SCAN ]] && SCAN="false"
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
     [[ -z $DOMAIN ]] && { _error "Missing domain"; exit 1; }
+
+    # -- Check scan.
+    if [[ $SCAN != "true" && $SCAN != "false" ]]; then
+        _error "Invalid scan value, must be true or false"
+        exit 1
+    fi
+
     _running "Creating zone $DOMAIN for tenant $TENANT_ID"
-    _cf_tenant_zone_create $TENANT_ID $DOMAIN
+    _cf_zone_create $TENANT_ID $DOMAIN $SCAN
+# -- Command: create-zone-bulk
+# ==============================
+elif [[ $CMD == "create-zone-bulk" ]]; then
+    _debug "Command: create-zone-bulk"
+    FILE=$1
+    [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
+    _running "Creating zones from file $FILE"
+    _cf_zone_create_bulk $FILE
+# -- Command: scan-zone
+# ==================================
+elif [[ $CMD == "scan-zone" ]]; then
+    _debug "Command: scan-zone"
+    ZONE_ID=$1
+    [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
+    _running "Scanning zone $ZONE_ID"
+    _cf_zone_scan $ZONE_ID
+# -- Command: list-zones
+# ==================================
+elif [[ $CMD == "list-zones" ]]; then
+    _debug "Command: list-zones"
+    ACCOUNT_ID=$1
+    [[ -z $ACCOUNT_ID ]] && { _error "Missing tenant ID"; exit 1; }
+    _running "Fetching zones for tenant $ACCOUNT_ID"
+    _cf_zone_list $ACCOUNT_ID
+# -- Command: get-zone
+# ==================================
+elif [[ $CMD == "get-zone" ]]; then
+    _debug "Command: get-zone"
+    ZONE_ID=$1
+    PRINT=$2
+    [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
+    _running "Fetching zone $ZONE_ID"
+    _cf_zone_get $ZONE_ID $PRINT
+# -- Command: delete-zone
+# ==================================
+elif [[ $CMD == "delete-zone" ]]; then
+    _debug "Command: delete-zone"    
+    ZONE_ID=$1
+    [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
+    _running "Deleting zone $ZONE_ID"
+    _cf_zone_delete $ZONE_ID
+# -- Command: count-zone-records
+# ==================================
+elif [[ $CMD == "count-zone-records" ]]; then
+    _debug "Command: count-zone-records"
+    ZONE_ID=$1
+    [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
+    _running "Counting zone records for zone $ZONE_ID"
+    _cf_zone_count_records $ZONE_ID
+# -- Command: count-zone-records-bulk
+# ==================================
+elif [[ $CMD == "count-zone-records-bulk" ]]; then
+    _debug "Command: count-zone-records-bulk"
+    FILE=$1
+    [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
+    _running "Counting zone records from file $FILE"
+    _cf_zone_count_records_bulk $FILE
 # -- Command: add-access
 # ==================================
 elif [[ $CMD == "add-access" ]]; then
