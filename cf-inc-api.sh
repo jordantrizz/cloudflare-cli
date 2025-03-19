@@ -7,44 +7,113 @@
 # -- Variables
 # =====================================
 API_URL="https://api.cloudflare.com"
+typeset -gA cf_api_functions
+
+# =============================================================================
+# -- Core Functions
+# =============================================================================
 
 # =====================================
-# -- debug_jsons
+# -- _list_core_functions
+# -- List all core functions
 # =====================================
-_debug_json () {
-    if [[ $DEBUG_JSON == "1" ]]; then
-        echo -e "${CCYAN}** Outputting JSON ${*}${NC}"
-        echo "${@}" | jq
-    fi
+cf_api_functions[_list_core_functions]="List all core functions"
+function _list_core_functions () {
+    _running "Listing all core functions with descriptions"
+    # Print header
+    printf "%-40s | %-40s | %s\n" "Function" "Description" "Count"
+    printf "%s-+-%s-+-%s\n" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..10})"
+    
+    # Loop through array, printing key and value
+    for FUNC_NAME in "${!cf_api_functions[@]}"; do
+        # -- Count how many times the function is used in the script
+        FUNC_COUNT=$(grep "$FUNC_NAME" $SCRIPT_DIR/*.sh | wc -l)
+        DESCRIPTION="${cf_api_functions[$FUNC_NAME]}"
+        printf "%-40s | %-40s | %s\n" "$FUNC_NAME" "$DESCRIPTION" "$FUNC_COUNT"
+    done
 }
 
+# =============================================================================
+# -- Cloudflare API Functions
+# =============================================================================
+
 # =====================================
-# -- cf_api <$REQUEST> <$API_PATH>
+# -- cf_api <$REQUEST> <$API_PATH> [--paginate] [--all-pages] $EXTRA
 # -- Run cf_api request and return output via $API_OUTPUT
 # -- Run cf_api request and return exit code via $CURL_EXIT_CODE
 # =====================================
+cf_api_functions[cf_api]="Run cf_api request"
 function cf_api() {
     # -- Run cf_api with tokens
-    _debug "function:${FUNCNAME[0]}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     _debug "Running cf_api() with ${*}"
+
+    # -- Pagination
+    local PAGINATE=0
+    local ALL_PAGES=0
+    local PAGE=1
+    local PER_PAGE=50
+    local HAS_MORE=false
+    local COMBINED_RESULTS=""
+    local API_PATH=""
+    local REQUEST=""
+    local CURL_HEADERS=()
+    local args=()
+
+    # Parse arguments for pagination options
+    for arg in "$@"; do
+        case "$arg" in
+            --paginate)
+                PAGINATE=1
+                ;;
+            --all-pages)
+                PAGINATE=1
+                ALL_PAGES=1
+                ;;
+            --page=*)
+                PAGE="${arg#*=}"
+                PAGINATE=1
+                ;;
+            --per-page=*)
+                PER_PAGE="${arg#*=}"
+                PAGINATE=1
+                ;;
+            *)
+                args+=("$arg")
+                ;;
+        esac
+    done
+    _debug "ARG: ${args[*]}"
+
+    # Set pagination parameters
+    REQUEST="${args[0]}"
+    API_PATH="${args[1]}"
+
+    # Add pagination parameters if needed
+    if [[ $PAGINATE -eq 1 ]]; then
+        # Check if API_PATH already has query parameters
+        if [[ "$API_PATH" == *\?* ]]; then            
+            API_PATH="${API_PATH}&page=${PAGE}&per_page=${PER_PAGE}"
+        else
+            API_PATH="${API_PATH}?page=${PAGE}&per_page=${PER_PAGE}"
+        fi
+    fi
+    _debug "API_PATH: $API_PATH"
 
     if [[ -n $API_TOKEN ]]; then
         CURL_HEADERS=("-H" "Authorization: Bearer ${API_TOKEN}")
-        _debug "Using \$API_TOKEN as 'Authorization: Bearer'. \$CURL_HEADERS: ${CURL_HEADERS[*]}"
-        REQUEST="$1"
-        API_PATH="$2"
-        CURL_OUTPUT=$(mktemp)
+        _debug "Using \$API_TOKEN as 'Authorization: Bearer'. \$CURL_HEADERS: ${CURL_HEADERS[*]}"        
     elif [[ -n $API_ACCOUNT ]]; then
-            CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" -H "X-Auth-Email: ${API_ACCOUNT}")
-            _debug "Using \$API_APIKEY as X-Auth-Key. \$CURL_HEADERS: ${CURL_HEADERS[*]}"
-            REQUEST="$1"
-            API_PATH="$2"
-            CURL_OUTPUT=$(mktemp)
+        CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" -H "X-Auth-Email: ${API_ACCOUNT}")
+        _debug "Using \$API_APIKEY as X-Auth-Key. \$CURL_HEADERS: ${CURL_HEADERS[*]}"        
     else
         _error "No API Token or API Key found...major error...exiting"
         exit 1
     fi
 
+    CURL_OUTPUT=$(mktemp)
+
+    # -- Start API Call
     _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}""
     [[ $DEBUG == "1" ]] && set -x
     CURL_EXIT_CODE=$(curl -s -w "%{http_code}" --request "$REQUEST" \
@@ -70,8 +139,32 @@ function cf_api() {
 }
 
 # =====================================
+# -- parse_cf_error $API_OUTPUT
+# =====================================
+cf_api_functions[parse_cf_error]="Parse Cloudflare API Error"
+parse_cf_error () {
+    API_OUTPUT=$1
+    _debug "Running parse_cf_error"
+    ERROR_CODE=$(echo $API_OUTPUT | jq -r '.errors[0].code')
+    ERROR_MESSAGE=$(echo $API_OUTPUT | jq -r '.errors[0].message')
+    _error "Error: $ERROR_CODE - $ERROR_MESSAGE"
+}
+
+# =====================================
+# -- debug_jsons
+# =====================================
+cf_api_functions[_debug_jsons]="Output JSON"
+_debug_json () {
+    if [[ $DEBUG_JSON == "1" ]]; then
+        echo -e "${CCYAN}** Outputting JSON ${*}${NC}"
+        echo "${@}" | jq
+    fi
+}
+
+# =====================================
 # -- test_creds $ACCOUNT $API_KEY
 # =====================================
+cf_api_functions[test_creds]="Test credentials"
 function test_creds () {
     if [[ -n $API_TOKEN ]]; then
         _debug "function:${FUNCNAME[0]}"
@@ -94,6 +187,7 @@ function test_creds () {
 # =====================================
 # -- test_api_token $TOKEN
 # =====================================
+cf_api_functions[test_api_token]="Test API Token"
 function test-token () {
     _debug "function:${FUNCNAME[0]}"
     _running "Testing token via CLI"
@@ -102,11 +196,16 @@ function test-token () {
     [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
 }
 
+# =============================================================================
+# -- Cloudflare Zone Functions
+# =============================================================================
+
 # =====================================
 # -- get_zone_id $DOMAIN_NAME
 # -- Returns: message
 # -- Get domain zoneid
 # =====================================
+cf_api_functions[get_zone_id]="Get domain zoneid"
 function get_zone_id () {
     _debug "function:${FUNCNAME[0]}"
     _running "Getting zone_id for ${DOMAIN_NAME}"
@@ -132,6 +231,7 @@ function get_zone_id () {
 # -- Returns: var($ZONE_ID)
 # -- Get domain zoneid
 # =====================================
+cf_api_functions[get_zone_idv2]="Get domain zoneid"
 function get_zone_idv2 () {    
     DOMAIN_NAME=$1
     [[ -z $DOMAIN_NAME ]] && _error "Missing domain name" && exit 1
@@ -159,6 +259,7 @@ function get_zone_idv2 () {
 # -- CF_GET_ZONEID $CF_ZONE
 # -- Get domain zoneid
 # ==================================
+cf_api_functions[CF_GET_ZONEID]="Get domain zoneid"
 CF_GET_ZONEID () {
     ZONE=$1
     CF_ZONEID_CURL=$(curl -s -X GET 'https://api.cloudflare.com/client/v4/zones/?per_page=500' \
@@ -214,9 +315,38 @@ CF_GET_ZONEID () {
 }
 
 # =====================================
+# -- _cf_tenant_zone_create $TENANT_ID $DOMAIN
+# =====================================
+cf_api_functions[_cf_tenant_zone_create]="Create tenant zone"
+function _cf_tenant_zone_create () {
+    local TENANT_ID=$1
+    local DOMAIN=$2
+    _debug "Creating zone $DOMAIN for tenant $TENANT_ID"
+    cf_api POST /client/v4/zones \
+    -H "Content-Type: application/json" \
+    -d '{
+        "name": "'"$DOMAIN"'",
+        "account": {
+            "id": "'"$TENANT_ID"'"
+        }
+    }'
+
+    # -- Get Domain ID
+    DOMAIN_ID=$(echo $API_OUTPUT | jq -r '.result.id')
+    _success "Zone $DOMAIN created with ID $DOMAIN_ID"
+    _quiet "$DOMAIN_ID"
+}
+
+
+# =============================================================================
+# -- Account Functions
+# =============================================================================
+
+# =====================================
 # -- _get_account_id_from_creds
 # -- Get account ID from credentials
 # =====================================
+cf_api_functions[_get_account_id_from_creds]="Get account ID from credentials"
 _get_account_id_from_creds () {
     _debug "function:${FUNCNAME[0]}"
     _debug "Getting account id from credentials"    
@@ -237,6 +367,7 @@ _get_account_id_from_creds () {
 # =====================================
 # -- get_account_id_from_domain $DOMAIN
 # =====================================
+cf_api_functions[get_account_id_from_domain]="Get account ID from domain"
 get_account_id_from_domain() {
     local DOMAIN_NAME=$1
      cf_api GET /client/v4/zones?name=${DOMAIN_NAME}
@@ -252,6 +383,7 @@ get_account_id_from_domain() {
 # =====================================
 # -- get_account_id_from_zone $ZONE_ID
 # =====================================
+cf_api_functions[get_account_id_from_zone]="Get account ID from zone"
 function get_account_id_from_zone () {
     ZONE_ID=$1
     _debug "function:${FUNCNAME[0]}"
@@ -277,22 +409,12 @@ function get_account_id_from_zone () {
 # =====================================
 # -- get_permissions
 # =====================================
+cf_api_functions[get_permissions]="Get permissions"
 get_permissions () {
     _debug "Running get_permissions"
     cf_api GET /client/v4/user/tokens/permission_groups
 }
 
-
-# =====================================
-# -- parse_cf_error $API_OUTPUT
-# =====================================
-parse_cf_error () {
-    API_OUTPUT=$1
-    _debug "Running parse_cf_error"
-    ERROR_CODE=$(echo $API_OUTPUT | jq -r '.errors[0].code')
-    ERROR_MESSAGE=$(echo $API_OUTPUT | jq -r '.errors[0].message')
-    _error "Error: $ERROR_CODE - $ERROR_MESSAGE"
-}
 
 # =============================================================================
 # -- Cloudflare WAF Rule Functions
@@ -302,6 +424,7 @@ parse_cf_error () {
 # -- cf_create_filter_json $ZONE_ID $JSON
 # -- Create filter
 # ==================================
+cf_api_functions[cf_create_filter_json]="Create WAF filter"
 function cf_create_filter_json() {
     local ZONE_ID=$1
     local JSON=$2
@@ -343,6 +466,7 @@ function cf_create_filter_json() {
 # -- CF_CREATE_FILTER $ZONE_ID $CF_EXPRESSION
 # -- Create filter
 # ==================================
+cf_api_functions[CF_CREATE_FILTER]="Create WAF filter"
 function CF_CREATE_FILTER() {
 	local ZONE_ID=$1
 	local CF_EXPRESSION=$2
@@ -389,6 +513,7 @@ function CF_CREATE_FILTER() {
 # -- CF_CREATE_RULE $ZONE_ID $FILTER_ID $ACTION $PRIORITY $DESCRIPTION
 # -- Create rule
 # ==================================
+cf_api_functions[CF_CREATE_RULE]="Create WAF rule"
 function CF_CREATE_RULE () {
 	local ZONE_ID=$1
 	local FILTER_ID=$2
@@ -432,6 +557,7 @@ function CF_CREATE_RULE () {
 # =====================================
 # -- cf_list_rules_action $DOMAIN $ZONE_ID
 # =====================================
+cf_api_functions[cf_list_rules_action]="List all rules"
 function cf_list_rules_action () {
     local DOMAIN_NAME=$1 ZONE_ID=$2
     _debug "function:${FUNCNAME[0]}"
@@ -461,6 +587,7 @@ function cf_list_rules_action () {
 # -- cf_list_rules $ZONE_ID
 # -- Get Rules
 # =====================================
+cf_api_functions[cf_list_rules]="List all rules"
 function cf_list_rules() {
     local ZONE_ID=$1
     _debug "Getting rules on $ZONE_ID"
@@ -477,6 +604,7 @@ function cf_list_rules() {
 # -- cf_get_rule $ZONE_ID $RULE_ID
 # -- Get Rule
 # =====================================
+cf_api_functions[cf_get_rule]="Get rule"
 function cf_get_rule() {
     local ZONE_ID=$1
     local RULE_ID=$2
@@ -495,6 +623,7 @@ function cf_get_rule() {
 # -- cf_delete_rules_action $DOMAIN_NAME $ZONE_ID
 # -- Delete all rules
 # =====================================
+cf_api_functions[cf_delete_rules_action]="Delete all rules"
 function cf_delete_rules_action () {
 	DOMAIN_NAME=$1
     ZONE_ID=$2
@@ -558,6 +687,7 @@ function cf_delete_rules_action () {
 # -- cf_delete_rule_action $DOMAIN_NAME $ZONE_ID $RULE_ID
 # -- Delete rule
 # =====================================
+cf_api_functions[cf_delete_rule_action]="Delete rule"
 function cf_delete_rule_action () {
 	local DOMAIN_NAME=$1
     local ZONE_ID=$2
@@ -614,6 +744,7 @@ function cf_delete_rule () {
 # cf_list_filters_action $DOMAIN $ZONE_ID
 # -- Get Filters
 # ==================================
+cf_api_functions[cf_list_filters_action]="List all filters"
 function cf_list_filters_action () {
     local DOMAIN_NAME=$1
     local ZONE_ID=$2
@@ -646,6 +777,7 @@ function cf_list_filters_action () {
 # cf_list_filters $ZONE_ID
 # -- Get Filters
 # ==================================
+cf_api_functions[cf_list_filters]="List all filters"
 function CF_GET_FILTERS() {
 	local ZONE_ID=$1
 	_debug "Getting filters on $ZONE_ID"
@@ -662,6 +794,7 @@ function CF_GET_FILTERS() {
 # -- cf_list_filter $ZONE_ID $FILTER_ID
 # -- Get Filter
 # =====================================
+cf_api_functions[cf_list_filter]="List filter"
 function cf_list_filter () {
     local ZONE_ID=$1
     local FILTER_ID=$2
@@ -679,6 +812,7 @@ function cf_list_filter () {
 # -- cf_delete_filter_action $DOMAIN_NAME $ZONE_ID $FILTER_ID
 # -- Delete filter
 # =====================================
+cf_api_functions[cf_delete_filter_action]="Delete filter"
 function cf_delete_filter_action () {
     local DOMAIN_NAME=$1
     local ZONE_ID=$2
@@ -698,6 +832,7 @@ function cf_delete_filter_action () {
 # -- cf_delete_filters_action $DOMAIN_NAME $ZONE_ID
 # -- Delete all filters
 # =====================================
+cf_api_functions[cf_delete_filters_action]="Delete all filters"
 function cf_delete_filters_action () {
     local DOMAIN_NAME=$1
     local ZONE_ID=$2
@@ -750,6 +885,7 @@ function cf_delete_filters_action () {
 # -- cf_delete_filter $ZONE_ID $FILTER_ID
 # -- Delete filter
 # =====================================
+cf_api_functions[cf_delete_filter]="Delete filter"
 function cf_delete_filter () {
 	local ZONE_ID=$1
 	local FILTER_ID=$2
@@ -773,8 +909,9 @@ function cf_delete_filter () {
 # -- _cf_tenant_create $TENANT_NAME $ACCOUNT_ID
 # -- Create a tenant
 # ===============================================
+cf_api_functions[_cf_tenant_create]="Create a tenant"
 function _cf_tenant_create () {
-	_debug_all "func : ${*}"
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	local TENANT_NAME="$1" ACCOUNT_ID="$2"
 
 	# -- Create Tenant
@@ -790,24 +927,73 @@ function _cf_tenant_create () {
         NEW_TENANT_ID=$(echo $API_OUTPUT | jq -r '.result.id')
         _debug "New Tenant Created -- Name: ${TENANT_NAME} ID: ${NEW_TENANT_ID}"
         _success "Created Tenant: $NEW_TENANT_ID"
+        _quiet "$NEW_TENANT_ID"
     else
         _error "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 
     _running2 "Getting tenant $NEW_TENANT_ID"
-    CONFIRM_TENANT="$(_cf_get_tenant $NEW_TENANT_ID)"
+    CONFIRM_TENANT="$(_cf_tenant_get $NEW_TENANT_ID)"
     [[ $? -ne 0 ]] && _error "Couldn't get tenant" && exit 1
     _success "Tenant: $CONFIRM_TENANT"
 
 }
 
 # ===============================================
+# -- _cf_tenant_create_bulk $FILE
+# -- Create a tenant
+# ===============================================
+cf_api_functions[_cf_tenant_create_bulk]="Create a tenant"
+function _cf_tenant_create_bulk () {
+    _debug "function:${FUNCNAME[0]} - ${*}"
+	local FILE="$1"
+    local COUNT=0
+    local TMP_FILE="/tmp/tenants.tmp"
+    TENANT_IDS_CREATED=()
+
+    # -- Print out all tenants about to be created
+    _running2 "Creating tenants from file: $FILE"
+    echo "===================================="
+    cat $FILE
+    echo "===================================="
+
+    # -- Confirm?
+    read -p "Do you want to continue? (y|n) " yn
+    case $yn in
+        [Yy]* )
+        _running2 "Creating tenants"
+        ;;
+        [Nn]* ) exit;;
+        * ) echo "Please answer yes or no.";;
+    esac
+    echo "Continuing..."
+
+    # -- Each line is a company name
+    QUIET="1"
+    while IFS= read -r LINE; do
+        _debug "Creating tenant - $LINE"        
+        TENANT_ID="$(_cf_tenant_create $LINE)"
+        echo "\"$LINE\",$TENANT_ID"
+        TENANT_IDS_CREATED+="\"$LINE\",$TENANT_ID\n"
+        COUNT=$((COUNT+1))
+        sleep 2
+    done < $FILE
+    QUIET="0"
+
+    _running2 "Created $COUNT tenants"
+    # -- Print out all tenants created into a file
+    echo -e $TENANT_IDS_CREATED > $TMP_FILE
+    _success "Tenants created: $TMP_FILE"
+}
+
+# ===============================================
 # -- _cf_tenant_get $TENANT_ID
 # -- List a tenant
 # ===============================================
+cf_api_functions[_cf_tenant_get]="Get a tenant"
 function _cf_tenant_get () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
 
@@ -826,8 +1012,9 @@ function _cf_tenant_get () {
 # -- _cf_tenant_list_all $ACCOUNT_ID
 # -- List all tenants
 # ===============================================
+cf_api_functions[_cf_tenant_list_all]="List all tenants"
 function _cf_tenant_list_all () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local ACCOUNT_ID="$1"
 
     # -- List Tenants
@@ -845,13 +1032,15 @@ function _cf_tenant_list_all () {
 # -- _cf_tenant_delete $TENANT_ID
 # -- Delete a tenant
 # ===============================================
+cf_api_functions[_cf_tenant_delete]="Delete a tenant"
 function _cf_tenant_delete () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
 
     # -- Delete Tenant
     _debug "Deleting tenant"
+    
     cf_api DELETE /client/v4/accounts/$TENANT_ID
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         _success "Deleted Tenant: $TENANT_ID"
@@ -862,11 +1051,29 @@ function _cf_tenant_delete () {
 }
 
 # ===============================================
+# -- _cf_tenant_delete_bulk $TENANT_IDS
+# -- Delete multiple tenants
+# ===============================================
+cf_api_functions[_cf_tenant_delete_bulk]="Delete multiple tenants"
+function _cf_tenant_delete_bulk () {
+    _debug "function:${FUNCNAME[0]} - ${*}"
+    local TENANT_IDS="$@"
+    [[ -z $TENANT_IDS ]] && _error "Missing tenant IDs" && exit 1
+
+    # -- Break up tenants separated by , and put into array
+    IFS=',' read -r -a TENANT_IDS <<< "$TENANT_IDS"
+    for TENANT_ID in "${TENANT_IDS[@]}"; do
+        _cf_tenant_delete $TENANT_ID
+    done
+}
+
+# ===============================================
 # -- _cf_tenant_roles_get $TENANT_ID
 # -- Get tenant roles
 # ===============================================
+cf_api_functions[_cf_tenant_roles_get]="Get tenant roles"
 function _cf_tenant_roles_get () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
 
@@ -885,8 +1092,9 @@ function _cf_tenant_roles_get () {
 # -- _cf_tenant_access_add $TENANT_ID $EMAIL $ROLE
 # -- Create a tenant access
 # ===============================================
+cf_api_functions[_cf_tenant_access_add]="Create a tenant access"
 function _cf_tenant_access_add () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" EMAIL="$2" ROLE="$3"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
     [[ -z $EMAIL ]] && _error "Missing email" && exit 1
@@ -924,8 +1132,9 @@ function _cf_tenant_access_add () {
 # -- _cf_tenant_access_get $TENANT_ID
 # -- Get a tenant access
 # ===============================================
+cf_api_functions[_cf_tenant_access_get]="Get a tenant access"
 function _cf_tenant_access_get () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local $TENANT_ID="$1"
     [[ -z $TENANT_ID ]] && _error "Missing tenant access ID" && exit 1
 
@@ -966,8 +1175,9 @@ function _cf_tenant_access_get () {
 # -- _cf_tenant_access_get_member $TENANT_ID $MEMBER_ID
 # -- Get a tenant access
 # ===============================================
+cf_api_functions[_cf_tenant_access_get_member]="Get a tenant access"
 function _cf_tenant_access_get_member () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local $TENANT_ID="$1" MEMBER_ID="$2"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
     [[ -z $MEMBER_ID ]] && _error "Missing member ID" && exit 1
@@ -989,8 +1199,9 @@ function _cf_tenant_access_get_member () {
 # -- _cf_tenant_access_delete $TENANT_ID $MEMBER_ID
 # -- Delete a tenant access
 # ===============================================
+cf_api_functions[_cf_tenant_access_delete]="Delete a tenant access"
 function _cf_tenant_access_delete () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" MEMBER_ID="$2"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
     [[ -z $MEMBER_ID ]] && _error "Missing member ID" && exit 1
@@ -1010,8 +1221,9 @@ function _cf_tenant_access_delete () {
 # -- _cf_get_member_id_from_email $TENANT_ID $EMAIL 
 # -- Get member ID from email
 # =====================================
+cf_api_functions[_cf_get_member_id_from_email]="Get member ID from email"
 function _cf_get_member_id_from_email () {
-    _debug_all "func : ${*}"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" EMAIL="$2"
     [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
     [[ -z $EMAIL ]] && _error "Missing email" && exit 1

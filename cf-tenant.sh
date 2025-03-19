@@ -12,6 +12,7 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VERSION=$(cat "${SCRIPT_DIR}/VERSION")
 DEBUG="0"
 DRYRUN="0"
+QUIET="0"
 
 # ==================================
 # -- Include cf-inc.sh and cf-api-inc.sh
@@ -33,12 +34,23 @@ function _cf_partner_help () {
     echo "Cloudflare Partner API"
     echo
     echo "Commands: -c, --command"
+    echo
+    _running "Account Commands:"
     echo "  create <name>                                - Create a new tenant"
+    echo "  create-bulk <file>                           - Create tenants in bulk"
     echo "  create-access <tenant-id> <account_id>       - Create a new tenant with access"
     echo "  list                                         - List all tenants"
     echo "  get <id>                                     - Get tenant details"
-    echo "  delete <id>                                  - Delete tenant"
+    echo "  delete <id>,<id>                             - Delete tenant, or multiple separated by ,"
     echo
+    _running "Zone Commands:"
+    echo "  create-zone <tenant-id> <domain>             - Create a new zone for tenant"
+    echo "  create-zone-bulk <file>                      - Create zones in bulk"
+    echo "  list-zones <tenant-id>                        - List all zones for tenant"
+    echo "  get-zone <tenant-id> <zone-id>                - Get zone details"
+    echo "  delete-zone <tenant-id> <zone-id>             - Delete zone"
+    echo
+    _running "Access Commands:"
     echo "  add-access <tenant-id> <email> <role>        - Create a new access for tenant"
     echo "  get-access <tenant-id> <account_id>          - Get access for tenant"
     echo "  delete-access <tenant-id> <member-id>        - Get all roles"
@@ -48,6 +60,7 @@ function _cf_partner_help () {
     echo "  -h, --help             Show this help message and exit"
     echo "  -q, --quiet            Suppress output"
     echo "  -d, --debug            Show debug output"
+    echo "  --cf                   List Core function"
 }
 
 # ==============================================================================================
@@ -80,6 +93,10 @@ _debug "ALL_ARGS: ${*}@"
         QUIET="1"
         shift # past argument
         ;;
+        --cf)
+        _list_core_functions
+        exit 0
+        ;;        
         *)    # unknown option
         POSITIONAL+=("$1") # save it in an array for later
         shift # past argument
@@ -104,6 +121,14 @@ if [[ $CMD == "create" ]]; then
     [[ -z $NAME ]] && { _error "Missing tenant name"; exit 1; }
     _running "Creating tenant $NAME"
     _cf_tenant_create $NAME
+# -- Command: create-bulk
+# ==================================
+elif [[ $CMD == "create-bulk" ]]; then
+    _debug "Command: create-bulk"
+    FILE=$1
+    [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
+    _running "Creating tenants from file $FILE"
+    _cf_tenant_create_bulk $FILE
 # -- Command: create-access
 # ==================================
 elif [[ $CMD == "create-access" ]]; then
@@ -135,18 +160,39 @@ elif [[ $CMD == "get" ]]; then
 # ==================================
 elif [[ $CMD == "delete" ]]; then
     _debug "Command: delete"
-    TENANT_ID=$1
+    TENANT_ID=$@
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
-    _running "Deleting tenant $TENANT_ID"
+
+    _running "Deleting tenant"
     # -- Confirm
-    echo "Are you sure you want to delete tenant $TENANT_ID?"
+    _running2 "Are you sure you want to delete tenant(s)?\n"
+    echo -e "$TENANT_ID\n"
     read -p "Continue (y/n)? " choice
     case "$choice" in
-    y|Y ) _running "Deleting tenant $TENANT_ID";;
+    y|Y ) ;;
     n|N ) _error "Aborted"; exit 1;;
     * ) _error "Invalid"; exit 1;;
     esac
-    _cf_delete_tenant $TENANT_ID
+    echo
+    
+    # -- Check if multiple tenant IDs separated by ,
+    if [[ $TENANT_ID == *","* ]]; then
+        _running "Deleting multiple tenants"
+        _cf_tenant_delete_bulk $TENANT_ID
+    else
+        _running "Deleting tenant $TENANT_ID"
+        _cf_tenant_delete $TENANT_ID
+    fi    
+# -- Command: create-zone
+# ==================================
+elif [[ $CMD == "create-zone" ]]; then
+    _debug "Command: create-zone"
+    TENANT_ID=$1
+    DOMAIN=$2
+    [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
+    [[ -z $DOMAIN ]] && { _error "Missing domain"; exit 1; }
+    _running "Creating zone $DOMAIN for tenant $TENANT_ID"
+    _cf_tenant_zone_create $TENANT_ID $DOMAIN
 # -- Command: add-access
 # ==================================
 elif [[ $CMD == "add-access" ]]; then

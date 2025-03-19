@@ -27,15 +27,17 @@ CDARKGRAY=$(tput setaf 8)
 # =====================================
 # -- messages
 # =====================================
-_error () { echo -e "${CRED}** ERROR ** - ${*} ${NC}" >&2; } # _error
-_warning () { echo -e "${CYELLOW}** WARNING ** - ${*} ${NC}"; } # _warning
-_success () { echo -e "${CGREEN}** SUCCESS ** - ${*} ${NC}"; } # _success
-_running () { echo -e "${CBLUEBG}${*}${NC}"; } # _running
-_running2 () { echo -e " * ${CGRAY}${*}${NC}"; } # _running
-_running3 () { echo -e " ** ${CDARKGRAY}${*}${NC}"; } # _running
-_creating () { echo -e "${CGRAY}${*}${NC}"; }
-_separator () { echo -e "${CYELLOWBG}****************${NC}"; }
-_dryrun () { echo -e "${CCYAN}** DRYRUN: ${*$}${NC}"; }
+
+_error () { [[ $QUIET == "0" ]] && echo -e "${CRED}** ERROR ** - ${*} ${NC}" >&2; } 
+_warning () { [[ $QUIET == "0" ]] && echo -e "${CYELLOW}** WARNING ** - ${*} ${NC}"; }
+_success () { [[ $QUIET == "0" ]] && echo -e "${CGREEN}** SUCCESS ** - ${*} ${NC}"; }
+_running () { [[ $QUIET == "0" ]] && echo -e "${CBLUEBG}${*}${NC}"; }
+_running2 () { [[ $QUIET == "0" ]] && echo -e " * ${CGRAY}${*}${NC}"; }
+_running3 () { [[ $QUIET == "0" ]] && echo -e " ** ${CDARKGRAY}${*}${NC}"; }
+_creating () { [[ $QUIET == "0" ]] && echo -e "${CGRAY}${*}${NC}"; }
+_separator () { [[ $QUIET == "0" ]] && echo -e "${CYELLOWBG}****************${NC}"; }
+_dryrun () { [[ $QUIET == "0" ]] && echo -e "${CCYAN}** DRYRUN: ${*$}${NC}"; }
+_quiet () { [[ $QUIET == "1" ]] && echo -e "${*}"; }
 
 # =====================================
 # -- _debug $*
@@ -45,13 +47,6 @@ _debug () {
         # Print ti stderr
         echo -e "${CCYAN}** DEBUG ** - ${*}${NC}" >&2
     fi
-}
-
-# =====================================
-# -- debug_all
-# =====================================
-function _debug_all () {
-	_debug "DEBUG_ALL: ${*}"
 }
 
 # =====================================

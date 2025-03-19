@@ -686,7 +686,7 @@ invalidate)
 # -- template ( $TEMPLATE_NAME, $ZONE_ID )
 # =================================================================================================
 template)
-	_debug_all "func template: ${*}"		
+	_debug "function:${FUNCNAME[0]} - ${*}"
 	CMD=$1
 	shift
 	TEMPLATE_NAME=$1
