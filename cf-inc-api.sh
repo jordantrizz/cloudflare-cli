@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =================================================================================================
-# cf-api-inc v1.2
+# cf-api-inc v1.3
 # =================================================================================================
 
 # =====================================
@@ -8,6 +8,7 @@
 # =====================================
 API_LIB_VERSION="1.1"
 API_URL="https://api.cloudflare.com"
+DEBUG_CURL_OUTPUT="0"
 typeset -gA cf_api_functions
 echo "Cloudflare API Library v${API_LIB_VERSION}"
 
@@ -159,13 +160,17 @@ parse_cf_error () {
 }
 
 # =====================================
-# -- debug_jsons
+# -- debug_json
 # =====================================
 cf_api_functions[_debug_jsons]="Output JSON"
-_debug_json () {
-    if [[ $DEBUG_JSON == "1" ]]; then
-        echo -e "${CCYAN}** Outputting JSON ${*}${NC}"
-        echo "${@}" | jq
+function _debug_json() {
+    _debug "function:${FUNCNAME[0]} DEBUG_CURL_OUTPUT=$DEBUG_CURL_OUTPUT"
+    if [[ $DEBUG_CURL_OUTPUT == "1" ]]; then
+        _debug "******** Outputting JSON ********"
+        _debug "${*}"
+        _debug "******** Outputting JSON ********"
+    else
+        _debug "Not outputting JSON, use -DC"
     fi
 }
 
@@ -730,7 +735,7 @@ _get_account_id_from_creds () {
 # =====================================
 cf_api_functions[_cf_zone_accountid]="Get account ID from zone"
 _cf_zone_accountid() {
-    _debug "function:${FUNCNAME[0]} - $@"
+    _debug "function:${FUNCNAME[0]} - ${*}"
     local DOMAIN_NAME=$1
     local ACCOUNTS_RETURNED=""
     local ACCOUNT_NAME=""

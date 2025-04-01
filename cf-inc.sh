@@ -1,5 +1,5 @@
 # =============================================================================
-# -- cf-inc.sh - v2.1 - Cloudflare Includes
+# -- cf-inc.sh - v2.2 - Cloudflare Includes
 # =============================================================================
 
 # =============================================================================
@@ -70,17 +70,6 @@ function _debug () {
 		DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 		echo -e "${PREV_CALLER_NAME}:${DEBUG_MSG_OUTPUT}" >> "$DEBUG_FILE_PATH"
 	fi
-}
-
-# =====================================
-# -- _debug_json $*
-# =====================================
-#  Print JSON debug to file
-# TODO - Should be removed.
-_debug_json () {
-    if [ -f $SCRIPT_DIR/.debug ]; then
-        echo "${*}" | jq
-    fi
 }
 
 # =====================================
