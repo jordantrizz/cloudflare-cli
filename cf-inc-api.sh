@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =================================================================================================
-# cf-api-inc v1.3
+# cf-api-inc v1.4
 # =================================================================================================
 
 # =====================================
@@ -103,6 +103,7 @@ function cf_api() {
     fi
     _debug "API_PATH: $API_PATH"
 
+    # -- Create headers for curl
     if [[ -n $API_TOKEN ]]; then
         CURL_HEADERS=("-H" "Authorization: Bearer ${API_TOKEN}")
         _debug "Using \$API_TOKEN as 'Authorization: Bearer'. \$CURL_HEADERS: ${CURL_HEADERS[*]}"        
@@ -114,17 +115,19 @@ function cf_api() {
         exit 1
     fi
 
+    # -- Create temporary file for curl output
     CURL_OUTPUT=$(mktemp)
 
     # -- Start API Call
     _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}" --output $CURL_OUTPUT ${EXTRA[*]}"
     [[ $DEBUG == "1" ]] && set -x
-    CURL_EXIT_CODE=$(curl -s -w "%{http_code}" --request "$REQUEST" \
+    CURL_EXIT_CODE=$(curl -s --output "$CURL_OUTPUT" -w "%{http_code}" --request "$REQUEST" \
         --url "${API_URL}${API_PATH}" \
         "${CURL_HEADERS[@]}" \
-        --output "$CURL_OUTPUT" "${EXTRA[*]}")
+        "${EXTRA[@]}")
     [[ $DEBUG == "1" ]] && set +x
     API_OUTPUT=$(<"$CURL_OUTPUT")
+    _debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
     _debug_json "$API_OUTPUT"
     rm "$CURL_OUTPUT"
 
@@ -773,10 +776,10 @@ _cf_zone_accountid() {
 }
 
 # =====================================
-# -- get_account_id_from_zone $ZONE_ID
+# -- _cf_get_account_id_from_zone $ZONE_ID
 # =====================================
-cf_api_functions[get_account_id_from_zone]="Get account ID from zone"
-function get_account_id_from_zone () {
+cf_api_functions[_cf_get_account_id_from_zone]="Get account ID from zone"
+function _cf_get_account_id_from_zone () {
     ZONE_ID=$1
     _debug "function:${FUNCNAME[0]}"
     _debug "Getting account_id for ${ZONE_ID}"
@@ -1637,6 +1640,8 @@ function _cf_get_member_id_from_email () {
         exit
     fi
 }
+
+
 
 
 # ==================================================================================
