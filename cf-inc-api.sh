@@ -6,7 +6,7 @@
 # =====================================
 # -- Variables
 # =====================================
-API_LIB_VERSION="1.1"
+API_LIB_VERSION="1.5"
 API_URL="https://api.cloudflare.com"
 DEBUG_CURL_OUTPUT="0"
 declare -a cf_api_functions
