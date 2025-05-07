@@ -121,6 +121,13 @@ function cf_api() {
     # -- Create temporary file for curl output
     CURL_OUTPUT=$(mktemp)
 
+    # -- Check if POST or PUT request
+    if [[ $REQUEST == "POST" || $REQUEST == "PUT" ]]; then
+        # -- Add Content-Type header for POST/PUT requests
+        CURL_HEADERS+=("-H" "Content-Type: application/json" "--data")
+        _debug "Using Content-Type: application/json. \$CURL_HEADERS: ${CURL_HEADERS[*]}"
+    fi
+
     # -- Start API Call
     _debug "Running curl -s --request $REQUEST --url "${API_URL}${API_PATH}" "${CURL_HEADERS[*]}" --output $CURL_OUTPUT ${EXTRA[*]}"
     [[ $DEBUG == "1" ]] && set -x

@@ -266,8 +266,16 @@ add)
 			;;
 		A)
 			_running2 " -- Creating A record: $name $content $ttl $proxied"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
-			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
+			cf_api POST /client/v4/zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			if [[ $? != 1 ]]; then
+				_error "Error creating A record"
+				echo "$CURL_OUTPUT"
+			else
+				_success "Record created"
+				echo $API_OUTPUT | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
+			fi
+
+			echo -e "$API_OUTPUT" | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
 			;;
 		CNAME)
 			_running2 " -- Creating CNAME record: $name $content $ttl $proxied"
