@@ -16,6 +16,7 @@ Environment variables:
  CF_TOKEN    -  API token (as -T option)
 Enter "cloudflare help" to list available commands.
 ```
+
 # Config
 ## Config Global API
 1. Create a file in $HOME/.cloudflare
