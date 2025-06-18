@@ -3,6 +3,8 @@
 # cloudflare-cli v1.0.1
 # =================================================================================================
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+API_METHOD=""
+API_PROFILE=""
 # shellcheck source=./cf-inc.sh
 source "$SCRIPT_DIR/cf-inc.sh"
 # shellcheck source=./cf-inc-api.sh
@@ -40,6 +42,14 @@ do
 		-q|--quiet)
 			# TODO needs  to be re-implemmented
 			QUIET=1;;
+		-p|--profile)
+			shift
+			if [ -z "$1" ]; then
+				_die "Usage: cloudflare --profile <profile_name>"
+			fi
+			API_PROFILE="$1"
+			_debug "Using profile: $API_PROFILE"
+			;;
 		-h|--help)
 			help full
 			_die

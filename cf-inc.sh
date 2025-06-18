@@ -6,7 +6,6 @@
 # -- Variables
 # ==================================
 REQUIRED_APPS=("jq" "column")
-API_METHOD=""
 
 # ==================================
 # -- Colors
@@ -148,9 +147,39 @@ function _check_cloudflare_creds_old () {
 # -- Check for .cloudflare credentials
 # =====================================
 function _check_cloudflare_creds () {
+    _debug "${FUNCNAME[0]} called with PRE_TAG: $1"
+    _debug "API_PROFILE: $API_PROFILE"
     # -- PRE_TAG is the script, either CF_TS, CF_SPC or CF_
     local PRE_TAG=$1
     local CONFIG="$HOME/.cloudflare"
+
+    # -- Check if $API_PROFILE is set, if so, use it
+    if [[ -n $API_PROFILE ]]; then
+        API_PROFILE=$(echo "$API_PROFILE" | tr '[:lower:]' '[:upper:]')
+        _debug "Using API_PROFILE: $API_PROFILE"
+
+        # Check if the profile exists in the .cloudflare file
+        if [[ -f "$CONFIG" ]]; then
+            _debug "Checking for profile $API_PROFILE in $CONFIG as ${PRE_TAG}ACCOUNT_${API_PROFILE}"
+            if grep -q "^${PRE_TAG}ACCOUNT_${API_PROFILE}=" "$CONFIG"; then
+                API_ACCOUNT=$(grep "^${PRE_TAG}ACCOUNT_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
+                API_APIKEY=$(grep "^${PRE_TAG}KEY_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
+                API_METHOD="account"
+                _debug "Found profile $API_PROFILE: API_ACCOUNT = ${API_ACCOUNT} and API_APIKEY = ${API_APIKEY}"
+            elif grep -q "^${PRE_TAG}TOKEN_${API_PROFILE}=" "$CONFIG"; then
+                API_TOKEN=$(grep "^${PRE_TAG}TOKEN_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
+                API_METHOD="token"
+                _debug "Found profile $API_PROFILE: API_TOKEN = ${API_TOKEN}"
+            else
+                _error "Profile $API_PROFILE not found in $CONFIG"
+                exit 1
+            fi
+        fi
+        return
+    else
+        _debug "No API_PROFILE:$API_PROFILE set, checking for credentials in .cloudflare file"
+    fi
+
 
     if [[ -n $API_TOKEN ]]; then
         _running "Found \$API_TOKEN via CLI using for authentication/."

@@ -12,7 +12,6 @@ DEBUG=0
 DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 # Clear debug log
 echo "" > $DEBUG_FILE_PATH
-details=0
 QUIET=0
 NL=$'\n'
 TA=$'\t'
