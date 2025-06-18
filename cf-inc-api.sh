@@ -104,7 +104,7 @@ function cf_api() {
             API_PATH="${API_PATH}?page=${PAGE}&per_page=${PER_PAGE}"
         fi
     fi
-    _debug "API_PATH: $API_PATH"
+    _debug "API_PATH: $API_PATH API_METHOD: $API_METHOD API_TOKEN: $API_TOKEN API_APIKEY: $API_APIKEY API_ACCOUNT: $API_ACCOUNT"
 
     # -- Create headers for curl
     if [[ -n $API_TOKEN ]]; then

@@ -1,22 +1,18 @@
 #!/usr/bin/env bash
-
 # =================================================================================================
 # cloudflare-cli v1.0.1
 # =================================================================================================
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 # shellcheck source=./cf-inc.sh
-source cf-inc.sh
-source cf-inc-api.sh
-source cf-inc-cf.sh
+source "$SCRIPT_DIR/cf-inc.sh"
+# shellcheck source=./cf-inc-api.sh
+source "$SCRIPT_DIR/cf-inc-api.sh"
+# shellcheck source=cf-inc-cf.sh
+source "$SCRIPT_DIR/cf-inc-cf.sh"
 
 # ==============================================================================================
 # -- Start Script
 # ==============================================================================================
-
-# -- Variables
-
-
-# -- Check functions
-_pre_flight_check
 
 # -- Check options
 _debug "Checking for options"
@@ -55,6 +51,10 @@ do
 	esac
 	shift
 done
+
+# -- Check functions
+_pre_flight_check
+_debug "Running with $API_METHOD"
 
 # -- Check for arguments
 if [ -z "$1" ]; then
