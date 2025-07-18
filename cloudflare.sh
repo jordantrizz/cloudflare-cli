@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
+# ================================================================================
+# -- Cloudflare API Bash Script
+# =================================================================================
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+VERSION=$(cat $SCRIPT_DIR/VERSION)
+source "$SCRIPT_DIR/cf-cli-inc.sh"
+echo "Cloudflare CLI Version: $VERSION loaded from $SCRIPT_DIR/cf-cli-inc.sh"
+
 # =====================================
 # -- Variables
 # =====================================
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-VERSION=$(cat $SCRIPT_DIR/VERSION)
 DEBUG=0
 details=0
 quiet=0
@@ -12,16 +18,6 @@ TA=$'\t'
 CF_API_ENDPOINT=https://api.cloudflare.com/client/v4
 API_URL="https://api.cloudflare.com"
 APIv4_ENDPOINT=$CF_API_ENDPOINT # Remove eventually
-
-# -- Colors
-RED="\e[31m"
-GREEN="\e[32m"
-CYAN="\e[36m"
-BLUEBG="\e[44m"
-YELLOWBG="\e[43m"
-GREENBG="\e[42m"
-DARKGREYBG="\e[100m"
-ECOL="\e[0m"
 
 # -- HELP_VERSION
 HELP_VERSION=\
@@ -218,57 +214,7 @@ HELP () {
 	esac
 }
 
-# ----------------------
-# -- Messaging Functions
-# ----------------------
-_error () {
-    echo -e "${RED}** ERROR ** - $1 ${ECOL}"
-}
 
-_success () {
-    echo -e "${GREEN}** SUCCESS ** - $@ ${ECOL}"
-}
-
-_running () {
-    echo -e "${BLUEBG}${@}${ECOL}"
-}
-
-_creating () {
-    echo -e "${DARKGREYBG}${@}${ECOL}"
-}
-
-_separator () {
-    echo -e "${YELLOWBG}****************${ECOL}"
-}
-
-_debug () {
-    if [ $DEBUG == "1" ]; then
-		# Echo to stderr
-		echo -e "${CYAN}DEBUG: $@${ECOL}" >&2		
-    fi
-}
-
-# -- die
-_die() {
-	if [ -n "$1" ];	then
-		_error "$1"
-	fi
-	exit ${2:-1}
-}
-
-# -- check_bash - check version of bash
-check_bash () {
-	# - Check bash version and die if not at least 4.0
-	if [ $BASH_VERSINFO -lt 4 ]; then
-		_die "Sorry, you need at least bash 4.0 to run this script." 1
-	fi
-}
-
-# -- is_* functions
-is_debug() { [ "$DEBUG" = 1 ]; }
-is_quiet() { [ "$quiet" = 1 ]; }
-is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
-is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
 # =====================================
 # -- _cf_api <$REQUEST> <$API_PATH>
@@ -1184,7 +1130,7 @@ delete)
 		;;
 		
 	listing)
-		[ -z "$1" ] && die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
+		[ -z "$1" ] &&_die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
 		while read ruleid trg notes
 		do
@@ -1222,8 +1168,8 @@ change|set)
 	shift
 	case "$CMD2" in
 	zone)
-		[ -z "$1" ] && die "Usage: cloudflare $CMD1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
-		[ -z "$2" ] && die "Settings:
+		[ -z "$1" ] &&_die "Usage: cloudflare $CMD1 zone <zone> <setting> <value> [<setting> <value> [ ... ]]"
+		[ -z "$2" ] &&_die "Settings:
    security_level [under_attack | high | medium | low | essentially_off]
    cache_level [aggressive | basic | simplified]
    rocket_loader [on | off | manual]
@@ -1261,7 +1207,7 @@ Other: see output of 'show zone' command"
 				do
 					case "$s" in
 					css|html|js) eval $s=on;;
-					*) die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
+					*)_die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
 					esac
 				done
 				setting_value="{\"css\":\"$css\",\"html\":\"$html\",\"js\":\"$js\"}"
@@ -1289,7 +1235,7 @@ Settings:
   content        See description in 'add record' command
   ttl            See description in 'add record' command
   proxied        Turn CF proxying on/off"
-		[ -z "$1" ] && die "$str1"
+		[ -z "$1" ] &&_die "$str1"
 		record_name=$1
 		shift
 		record_type=''
@@ -1317,7 +1263,7 @@ Settings:
 		case $e in
 		0)	true;;
 		2)	die "No suitable DNS zone found for \`$record_name'";;
-		3)	is_quiet && die || die "DNS record \`$record_name' not found";;
+		3)	is_quiet &&_die ||_die "DNS record \`$record_name' not found";;
 		4)	die "Ambiguous record name: \`$record_name'";;
 		*)	die "Internal error";;
 		esac
@@ -1366,16 +1312,15 @@ Settings:
 # ----------------	
 clear)
 	case "$1" in
-	all-cache)
+	cache)
 		shift
-		[ -z "$1" ] && die "Usage: cloudflare clear cache <zone>"
-		get_zone_id "$1"
+		[ -z "$1" ] &&_die "Usage: cloudflare clear cache <zone>"
+		zone_id=$(get_zone_id "$1")
 		call_cf_v4 DELETE /zones/$zone_id/purge_cache '{"purge_everything":true}'
 		;;
 	*)
-		die "Parameters:
-   cache"
-		;;
+		_die "Parameters: cache"
+	;;
 	esac
 	;;
 
@@ -1386,12 +1331,12 @@ check)
 	case "$1" in
 	zone)
 		shift
-		[ -z "$1" ] && die "Usage: cloudflare check zone <zone>"
+		[ -z "$1" ] &&_die "Usage: cloudflare check zone <zone>"
 		get_zone_id "$1"
 		call_cf_v4 PUT /zones/$zone_id/activation_check
 		;;
 	*)
-		die "Parameters:
+		_die "Parameters:
    zone"
 		;;
 	esac
@@ -1433,11 +1378,11 @@ invalidate)
 		done
 		if [ -z "$zone_id" ]
 		then
-			die "Zone name could not be figured out."
+			_die "Zone name could not be figured out."
 		fi
 		call_cf_v4 DELETE /zones/$zone_id/purge_cache "{\"files\":[$urls]}"
 	else
-		die "Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]"
+		_die "Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]"
 	fi
 	;;
 	
