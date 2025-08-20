@@ -800,7 +800,7 @@ do
 	-q|--quiet)
 		quiet=1;;
 	-h|--help)
-		_error "$USAGE" 0
+		_error "$HELP_USAGE" 0
 		_die
 		;;
 	--)	shift
