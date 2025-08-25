@@ -1021,7 +1021,7 @@ add)
 		A)
 			CURL_CF POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
 			if [[ $? == 0 ]]; then
-				_success"Record added successfully - $zone $type $name $content $ttl $proxied"				
+				_success "Record added successfully - $zone $type $name $content $ttl $proxied"				
 			else
 				echo "Error adding record"
 			fi
