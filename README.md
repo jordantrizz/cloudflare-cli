@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=jordantrizz&project=cloudflare-cli&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 ## DESCRIPTION
 
 CLI utility managing CloudFlare services - highly focused on DNS - 
