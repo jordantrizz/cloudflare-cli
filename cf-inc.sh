@@ -143,10 +143,10 @@ function _check_cloudflare_creds_old () {
 }
 
 # =====================================
-# -- _check_cloudflare_creds $PRE_TAG
+# -- _check_cloudflare_creds_old $PRE_TAG
 # -- Check for .cloudflare credentials
 # =====================================
-function _check_cloudflare_creds () {
+function _check_cloudflare_creds_old () {
     _debug "${FUNCNAME[0]} called with PRE_TAG: $1"
     _debug "API_PROFILE: $API_PROFILE"
     # -- PRE_TAG is the script, either CF_TS, CF_SPC or CF_
@@ -260,7 +260,174 @@ function _check_cloudflare_creds () {
             done
         fi
     fi
+
+    # -- Final check
+    if [[ -z $API_TOKEN && -z $API_ACCOUNT && -z $API_APIKEY ]]; then
+        _error "No Cloudflare credentials found, please set via CLI or in \$HOME/.cloudflare"
+        exit 1
+    fi        
 }
+
+# =====================================
+# -- _check_cloudflare_creds $PRE_TAG
+# =====================================
+function _check_cloudflare_creds () {
+    _debug "${FUNCNAME[0]} called with PRE_TAG: $1"
+    local PRE_TAG=$1
+    local CONFIG="$HOME/.cloudflare"
+    local -a available_profiles=()
+    local -a profile_descriptions=()
+    
+    # Check if .cloudflare file exists
+    if [[ ! -f "$CONFIG" ]]; then
+        _error "No .cloudflare file found at $CONFIG"
+        exit 1
+    fi
+    
+    _debug "Processing .cloudflare file: $CONFIG"
+    
+    # Source the config file
+    # shellcheck source=/dev/null
+    source "$CONFIG"
+    
+    # Check for default CF_ACCOUNT and CF_KEY
+    if [[ -n ${CF_ACCOUNT:-} ]]; then
+        if [[ -n ${CF_KEY:-} ]]; then
+            available_profiles+=("DEFAULT_ACCOUNT")
+            profile_descriptions+=("Default - Account API (${CF_ACCOUNT})")
+            _debug "Found default account: CF_ACCOUNT=${CF_ACCOUNT} CF_KEY=${CF_KEY}"
+        else
+            available_profiles+=("DEFAULT_ACCOUNT_INCOMPLETE")
+            profile_descriptions+=("Default - Account API (${CF_ACCOUNT}) - (_KEY Missing)")
+            _debug "Found incomplete default account: CF_ACCOUNT=${CF_ACCOUNT} but no CF_KEY"
+        fi
+    elif [[ -n ${CF_KEY:-} ]]; then
+        available_profiles+=("DEFAULT_ACCOUNT_INCOMPLETE")
+        profile_descriptions+=("Default - Account API - (_ACCOUNT Missing)")
+        _debug "Found CF_KEY but no CF_ACCOUNT"
+    fi
+    
+    # Check for default CF_TOKEN
+    if [[ -n ${CF_TOKEN:-} ]]; then
+        available_profiles+=("DEFAULT_TOKEN")
+        profile_descriptions+=("Default - Token API")
+        _debug "Found default token: CF_TOKEN=${CF_TOKEN}"
+    fi
+    
+    # Find all profile-based configurations
+    local profiles
+    profiles=$(grep -E "^CF_[A-Z0-9_]+_(ACCOUNT|TOKEN|KEY)=" "$CONFIG" | sed -E 's/^CF_([A-Z0-9_]+)_(ACCOUNT|TOKEN|KEY)=.*/\1/' | sort -u)
+    
+    for profile in $profiles; do
+        local account_var="CF_${profile}_ACCOUNT"
+        local key_var="CF_${profile}_KEY"
+        local token_var="CF_${profile}_TOKEN"
+        
+        # Check for profile account/key combination
+        if [[ -n ${!account_var:-} ]]; then
+            if [[ -n ${!key_var:-} ]]; then
+                available_profiles+=("${profile}_ACCOUNT")
+                profile_descriptions+=("${profile} - Account API (${!account_var})")
+                _debug "Found profile account: ${account_var}=${!account_var} ${key_var}=${!key_var}"
+            else
+                available_profiles+=("${profile}_ACCOUNT_INCOMPLETE")
+                profile_descriptions+=("${profile} - Account API (${!account_var}) - (_KEY Missing)")
+                _debug "Found incomplete profile account: ${account_var}=${!account_var} but no ${key_var}"
+            fi
+        elif [[ -n ${!key_var:-} ]]; then
+            available_profiles+=("${profile}_ACCOUNT_INCOMPLETE")
+            profile_descriptions+=("${profile} - Account API - (_ACCOUNT Missing)")
+            _debug "Found ${key_var} but no ${account_var}"
+        fi
+        
+        # Check for profile token
+        if [[ -n ${!token_var:-} ]]; then
+            available_profiles+=("${profile}_TOKEN")
+            profile_descriptions+=("${profile} - Token API")
+            _debug "Found profile token: ${token_var}=${!token_var}"
+        fi
+    done
+    
+    # Check if we found any profiles
+    if [[ ${#available_profiles[@]} -eq 0 ]]; then
+        _error "No valid Cloudflare credentials found in $CONFIG"
+        exit 1
+    fi
+    
+    # If only one profile, use it automatically
+    if [[ ${#available_profiles[@]} -eq 1 ]]; then
+        local selected_profile="${available_profiles[0]}"
+        _debug "Only one profile found, using: $selected_profile"
+        _set_credentials_from_profile "$selected_profile"
+        return
+    fi
+    
+    # Multiple profiles found, prompt user to select
+    echo "Multiple Cloudflare profiles found in $CONFIG:"
+    echo
+    for i in "${!available_profiles[@]}"; do
+        echo "$((i+1)). ${profile_descriptions[i]}"
+    done
+    echo
+    
+    while true; do
+        read -p "Select a profile (1-${#available_profiles[@]}): " selection
+        if [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le ${#available_profiles[@]} ]]; then
+            local selected_profile="${available_profiles[$((selection-1))]}"
+            _debug "User selected profile: $selected_profile"
+            _set_credentials_from_profile "$selected_profile"
+            break
+        else
+            echo "Invalid selection. Please enter a number between 1 and ${#available_profiles[@]}."
+        fi
+    done
+}
+
+# =====================================
+# -- _set_credentials_from_profile
+# =====================================
+function _set_credentials_from_profile() {
+    local profile="$1"
+    
+    case "$profile" in
+        "DEFAULT_ACCOUNT")
+            API_ACCOUNT="$CF_ACCOUNT"
+            API_APIKEY="$CF_KEY"
+            API_METHOD="account"
+            _debug "Set credentials: API_ACCOUNT=${API_ACCOUNT}, API_METHOD=${API_METHOD}"
+            ;;
+        "DEFAULT_TOKEN")
+            API_TOKEN="$CF_TOKEN"
+            API_METHOD="token"
+            _debug "Set credentials: API_TOKEN=${API_TOKEN}, API_METHOD=${API_METHOD}"
+            ;;
+        *"_ACCOUNT")
+            local profile_name="${profile%_ACCOUNT}"
+            local account_var="CF_${profile_name}_ACCOUNT"
+            local key_var="CF_${profile_name}_KEY"
+            API_ACCOUNT="${!account_var}"
+            API_APIKEY="${!key_var}"
+            API_METHOD="account"
+            _debug "Set credentials: API_ACCOUNT=${API_ACCOUNT}, API_METHOD=${API_METHOD}"
+            ;;
+        *"_TOKEN")
+            local profile_name="${profile%_TOKEN}"
+            local token_var="CF_${profile_name}_TOKEN"
+            API_TOKEN="${!token_var}"
+            API_METHOD="token"
+            _debug "Set credentials: API_TOKEN=${API_TOKEN}, API_METHOD=${API_METHOD}"
+            ;;
+        *"_INCOMPLETE")
+            _error "Selected profile is incomplete and cannot be used"
+            exit 1
+            ;;
+        *)
+            _error "Unknown profile type: $profile"
+            exit 1
+            ;;
+    esac
+}
+
 
 # =====================================
 # -- _check_required_apps $REQUIRED_APPS

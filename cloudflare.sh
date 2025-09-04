@@ -277,15 +277,13 @@ add)
 		A)
 			_running2 " -- Creating A record: $name $content $ttl $proxied"
 			cf_api POST /client/v4/zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
-			if [[ $? != 1 ]]; then
-				_error "Error creating A record"
-				echo "$CURL_OUTPUT"
-			else
+			if [[ $? == 0 ]]; then
 				_success "Record created"
 				echo $API_OUTPUT | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
+			else
+				_error "Error creating A record"
+				echo "$API_OUTPUT"
 			fi
-
-			echo -e "$API_OUTPUT" | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
 			;;
 		CNAME)
 			_running2 " -- Creating CNAME record: $name $content $ttl $proxied"
