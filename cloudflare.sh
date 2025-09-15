@@ -873,9 +873,43 @@ show|list)
 	
 	# -- zone
 	zone)
-		# -- Invocation - CURL_CF <METHOD> <PATH> [PARAMETERS] [-- JSON_DECODER-ARGS]
-		#CURL_CF GET /zone --
-		echo "test"
+		# Display details about a single zone (pure bash + jq)
+		# Usage: cloudflare list zone <zone|zone_id>
+		[ -z "$1" ] && _die "Usage: cloudflare $CMD1 zone <zone>"
+		zone_query="$1"
+		if is_hex "$zone_query"; then
+			zone_id="$zone_query"
+		else
+			zone_id=$(get_zone_id "$zone_query")
+		fi
+		# Guard against unresolved zone IDs
+		if [ -z "$zone_id" ] || [ "$zone_id" = "null" ]; then
+			_die "Zone not found or not accessible: $zone_query" 1
+		fi
+		# Call API directly and parse with jq
+		API_OUTPUT=$(_cf_api GET "/client/v4/zones/$zone_id")
+		# If Cloudflare returns errors, show them
+		SUCCESS=$(echo "$API_OUTPUT" | jq -r '.success // false')
+		if [ "$SUCCESS" != "true" ]; then
+			parse_cf_error "$API_OUTPUT"
+			_die "Failed to fetch zone details for $zone_query"
+		fi
+		# Print selected fields in tab-separated columns and align
+		echo "$API_OUTPUT" | jq -r '
+		  .result | [
+		    ["Name", .name],
+		    ["ID", .id],
+		    ["Status", .status],
+		    ["Paused", (.paused|tostring)],
+		    ["Type", .type],
+		    ["Account", (.account.name // "")],
+		    ["Plan", (.plan.name // "")],
+		    ["Name servers", ((.name_servers // []) | join(", "))],
+		    ["Original name servers", ((.original_name_servers // []) | join(", "))],
+		    ["Created on", .created_on],
+		    ["Modified on", .modified_on],
+		    ["Activated on", .activated_on]
+		  ] | .[] | @tsv' | column -t -s $'\t'
 		;;
 	# -- zone
 	zones)
