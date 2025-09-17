@@ -65,3 +65,30 @@ is_debug() { [ "$DEBUG" = 1 ]; }
 is_quiet() { [ "$quiet" = 1 ]; }
 is_integer() { expr "$1" : '[0-9]\+$' >/dev/null; }
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
+
+# -- credential masking functions
+# Function to mask sensitive data for debug output (show only last 4 chars)
+_mask_credential() {
+	local credential="$1"
+	local length=${#credential}
+	if [ "$length" -le 4 ]; then
+		echo "****"
+	else
+		local masked_part=$(printf '%*s' $((length - 4)) '' | tr ' ' '*')
+		echo "${masked_part}${credential: -4}"
+	fi
+}
+
+# Function to get masked email for debug (show first char + last 4 of domain)
+_mask_email() {
+	local email="$1"
+	if [[ "$email" =~ ^([^@]+)@(.+)$ ]]; then
+		local user="${BASH_REMATCH[1]}"
+		local domain="${BASH_REMATCH[2]}"
+		local user_masked="${user:0:1}***"
+		local domain_masked="***${domain: -4}"
+		echo "${user_masked}@${domain_masked}"
+	else
+		echo "***@***.***"
+	fi
+}

@@ -760,8 +760,41 @@ findout_record() {
 # -- get_zone_id - get Cloudflare zone id
 # =====================================
 function get_zone_id() {
+	# Raw input (may contain surrounding whitespace)
 	DOMAIN=$1
-	_debug "Getting zone id for $1"
+	# Trim leading & trailing whitespace (spaces, tabs) using bash pattern substitution only
+	# Remove leading spaces/tabs
+	while :; do
+		case "$DOMAIN" in 
+			"" ) break;;
+			" "* ) DOMAIN="${DOMAIN# }";;
+			$'\t'* ) DOMAIN="${DOMAIN#$'\t'}";;
+			* ) break;;
+		 esac
+	 done
+	# Remove trailing spaces/tabs
+	while :; do
+		case "$DOMAIN" in 
+			*" " ) DOMAIN="${DOMAIN% }";;
+			*$'\t' ) DOMAIN="${DOMAIN%$'\t'}";;
+			* ) break;;
+		 esac
+	 done
+	_debug "Getting zone id for original input '$1' (trimmed: '$DOMAIN')"
+	if [ -z "$DOMAIN" ]; then
+		_die "#1 Zone not found: (empty domain)" 1
+	fi
+	if [ -z "$CF_ACCOUNT" ] || [ -z "$CF_KEY" ]; then
+		_debug "Credentials missing: CF_ACCOUNT='$(_mask_email "$CF_ACCOUNT")' CF_KEY='$(_mask_credential "$CF_KEY")' while resolving zone: $DOMAIN"
+		_die "Missing Cloudflare credentials (CF_ACCOUNT / CF_KEY)." 1
+	fi
+	# Credential sanity warnings
+	if [ ${#CF_ACCOUNT} -lt 5 ] || [[ ! "$CF_ACCOUNT" =~ @ ]]; then
+		_debug "WARNING: CF_ACCOUNT looks suspicious (length=${#CF_ACCOUNT}, masked=$(_mask_email "$CF_ACCOUNT"))"
+	fi
+	if [ ${#CF_KEY} -lt 10 ]; then
+		_debug "WARNING: CF_KEY looks too short (length=${#CF_KEY}, masked=$(_mask_credential "$CF_KEY"))"
+	fi
 	API_OUTPUT=$(_cf_api GET "/client/v4/zones?name=$DOMAIN")
 	local CURL_EXIT_CODE=$?
 
@@ -773,9 +806,16 @@ function get_zone_id() {
 		_debug "CF Error: $(parse_cf_error "$API_OUTPUT")"
 		_die "Error getting zone id for $DOMAIN"
 	fi
-	ZONE_ID=$(echo $API_OUTPUT | jq -r '.result[0].id')
+	ZONE_ID=$(echo "$API_OUTPUT" | jq -r 'if .success then (.result[0].id // "") else "" end')
+	if [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; then
+		_debug "Zone lookup returned empty id for domain $DOMAIN"
+		# Return empty string and exit code 1 instead of calling _die
+		echo ""
+		return 1
+	fi
 	_debug "Zone ID: $ZONE_ID"
-	echo $ZONE_ID
+	echo "$ZONE_ID"
+	return 0
 }
 
 
@@ -837,7 +877,7 @@ if [ ! -f "$HOME/.cloudflare" ]
 else
 	if is_debug; then _running "Found .cloudflare file."; fi
 	source $HOME/.cloudflare
-	_debug "Sourced CF_ACCOUNT: $CF_ACCOUNT CF_KEY: $CF_KEY"
+	_debug "Sourced CF_ACCOUNT: $(_mask_email "$CF_ACCOUNT") CF_KEY: $(_mask_credential "$CF_KEY")"
 	
         if [ -z "$CF_ACCOUNT" ]
         then
@@ -1000,6 +1040,10 @@ add)
 		[ -n "$prio" ] || prio=10
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		zone_id=$(get_zone_id "$zone")
+		# Check if get_zone_id failed (returned non-zero exit code)
+		if [ $? -ne 0 ] || [ -z "$zone_id" ]; then
+			_die "#1 Zone not found: $zone" 1
+		fi
 		
 		
 		case "$type" in
@@ -1053,11 +1097,12 @@ add)
 			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}"
 			;;
 		A)
-			CURL_CF POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			call_cf_v4 POST /zones/$zone_id/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
+			# call_cf_v4 should handle error reporting; mimic success message for consistency
 			if [[ $? == 0 ]]; then
-				_success "Record added successfully - $zone $type $name $content $ttl $proxied"				
+				_success "Record added successfully - $zone $type $name $content ttl=$ttl proxied=$proxied"
 			else
-				echo "Error adding record"
+				_error "Failed to add record - $zone $type $name"
 			fi
 			;;
 		CNAME)
