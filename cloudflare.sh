@@ -184,7 +184,7 @@ add)
 	record)		
 		[ $# -lt 4 ] && { help add record;_die "Missing arguments - $CMD_ALL"; }
 		_pre_flight_check
-		_debug "Running with $API_METHOD"
+		_debug "Running with API_METHOD: $API_METHOD"
 		ZONE=$1
 		shift
 		type=${1^^}
@@ -898,7 +898,7 @@ proxy)
 	fi
 
 	_pre_flight_check
-	_debug "Running with $API_METHOD" 
+	_debug "Running with API_METHOD:$API_METHOD" 
 
 	_running "Looking up record: $RECORD_NAME"
 	if ! findout_record "$RECORD_NAME" "" 1; then
