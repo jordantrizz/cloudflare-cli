@@ -62,19 +62,19 @@ do
 	shift
 done
 
-# -- Check functions
-_pre_flight_check
-_debug "Running with $API_METHOD"
-
-# -- Check for arguments
+# -- If no command left after option parsing, just show usage and exit
 if [ -z "$1" ]; then
 	help usage
 	_die "Missing arguments" 1
 fi
 
-# -- Debug
+# -- Debug full command (post-option parsing)
 CMD_ALL="${*}"
 _running "Running: ${CMD_ALL}"
+
+# -- At this point we know we have a real command, so run pre-flight checks
+_pre_flight_check
+_debug "Running with $API_METHOD"
 
 # =================================================================================================
 # -- Process Commands
