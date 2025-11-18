@@ -301,6 +301,48 @@ add)
 		esac
 		;;
 
+# =================================================================================================
+# -- proxy command @PROXY
+# =================================================================================================
+proxy)
+	_debug "sub-command: proxy ${*}"
+	RECORD_NAME=$1
+	if [[ -z "$RECORD_NAME" ]]; then
+		help usage
+		_die "Missing record name for proxy command" 1
+	fi
+
+	_running "Looking up record: $RECORD_NAME"
+	if ! findout_record "$RECORD_NAME" "" 1; then
+		_die "Record not found: $RECORD_NAME" 1
+	fi
+
+	# At this point findout_record has set: zone, zone_id, record_id, record_type, record_ttl, record_content
+	_debug "Found record: zone=$zone zone_id=$zone_id id=$record_id type=$record_type ttl=$record_ttl content=$record_content"
+
+	# Get current proxied status for the record
+	current_proxied=$(call_cf_v4 GET /zones/${zone_id}/dns_records/${record_id} -- .result %"%s" ,proxied)
+	if [[ "$current_proxied" == "true" ]]; then
+		target_proxied="false"
+		action="unproxy"
+	else
+		target_proxied="true"
+		action="proxy"
+	fi
+
+	_running2 "Record: $RECORD_NAME ($record_type) -> currently proxied=$current_proxied"
+	_read_answer "Do you want to $action this record? [y/N] "
+	case "$ANSWER" in
+		[yY]|[yY][eE][sS])
+			_running2 "Updating record to proxied=$target_proxied"
+			call_cf_v4 PATCH /zones/${zone_id}/dns_records/${record_id} -- '&>{"proxied":'"$target_proxied"'}'
+			;;
+		*)
+			_running2 "Aborted by user; no changes made."
+			;;
+	esac
+	;;
+
 	whitelist|blacklist|block|challenge)
 		trg=$1
 		trg_type=''
