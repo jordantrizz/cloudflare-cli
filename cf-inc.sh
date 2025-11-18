@@ -1,5 +1,5 @@
 # =============================================================================
-# -- cf-inc.sh - v2.2 - Cloudflare Includes
+# -- cf-inc.sh - v2.3 - Cloudflare Includes
 # =============================================================================
 
 # ==================================
@@ -48,6 +48,7 @@ function _debug () {
 
 	# Get previous calling function
 	PREV_CALLER=$(caller 1)
+    [[ -z $PREV_CALLER ]] && PREV_CALLER="0 main"
 	PREV_CALLER_NAME=$(echo "$PREV_CALLER" | awk '{print $2}')
 
 	if [ "$DEBUG" = "1" ]; then
@@ -58,11 +59,11 @@ function _debug () {
         if [[ "$(declare -p "$arg" 2>/dev/null)" =~ "declare -a" ]]; then
 			DEBUG_MSG_OUTPUT+="Array contents:"
 			for item in "${arg[@]}"; do
-			    DEBUG_MSG_OUTPUT+="${item}"
+                DEBUG_MSG_OUTPUT+="${item}"
 			done               
             echo -e "${CCYAN}** DEBUG: ${PREV_CALLER_NAME}: ARRAY: ${DEBUG_MSG_OUTPUT}${NC}" >&2    
 		else
-		    echo -e "${CCYAN}** DEBUG: ${PREV_CALLER_NAME}: ${DEBUG_MSG}${NC}" >&2
+            echo -e "${CCYAN}** DEBUG: ${PREV_CALLER_NAME}: ${DEBUG_MSG}${NC}" >&2
         fi
 	fi
 
