@@ -23,15 +23,26 @@ echo "Cloudflare API Library v${API_LIB_VERSION}"
 cf_api_functions["_list_core_functions"]="List all core functions"
 function _list_core_functions () {
     _running "Listing all core functions with descriptions"
+
     # Print header
     printf "%-40s | %-40s | %s\n" "Function" "Description" "Count"
     printf "%s-+-%s-+-%s\n" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..10})"
-    
-    # Loop through array, printing key and value
-    for FUNC_NAME in "${!cf_api_functions[@]}"; do
-        # -- Count how many times the function is used in the script
-        FUNC_COUNT=$(grep -c "$FUNC_NAME" "$SCRIPT_DIR"/*.sh)
-        DESCRIPTION="${cf_api_functions[$FUNC_NAME]}"
+
+    # Discover functions from cf_api_functions metadata lines in this file
+    grep -E '^cf_api_functions\["[^"]*"\]=' "$SCRIPT_DIR/cf-inc-api.sh" \
+    | while IFS='=' read -r left right; do
+        # left: cf_api_functions["name"]
+        # right: "Description"
+
+        FUNC_NAME=${left#cf_api_functions[\"}
+        FUNC_NAME=${FUNC_NAME%\"]}
+
+        DESCRIPTION=${right#\"}
+        DESCRIPTION=${DESCRIPTION%\"}
+
+        # Count how many times the function name appears across scripts
+        FUNC_COUNT=$(grep -Rho "$FUNC_NAME" "$SCRIPT_DIR"/*.sh 2>/dev/null | wc -l)
+
         printf "%-40s | %-40s | %s\n" "$FUNC_NAME" "$DESCRIPTION" "$FUNC_COUNT"
     done
 }
@@ -121,9 +132,9 @@ function cf_api() {
     # -- Create temporary file for curl output
     CURL_OUTPUT=$(mktemp)
 
-    # -- Check if POST or PUT request
-    if [[ $REQUEST == "POST" || $REQUEST == "PUT" ]]; then
-        # -- Add Content-Type header for POST/PUT requests
+    # -- Check if request needs JSON payload header
+    if [[ $REQUEST == "POST" || $REQUEST == "PUT" || $REQUEST == "PATCH" ]]; then
+        # -- Add Content-Type header for mutating requests
         CURL_HEADERS+=("-H" "Content-Type: application/json" "--data")
         _debug "Using Content-Type: application/json. \$CURL_HEADERS: ${CURL_HEADERS[*]}"
     fi
@@ -659,6 +670,166 @@ function _cf_zone_count_records_bulk () {
     _success "Output written to $TMP_FILE"
 }
 
+# =============================================================================
+# -- Record Functions
+# =============================================================================
+# =====================================
+# -- _cf_record_info $ZONE_ID $RECORD_ID
+# -- Get record info
+# =====================================
+cf_api_functions["_cf_record_info"]="Get record info"
+function _cf_record_info () {
+    local ZONE_ID=$1
+    local RECORD_ID=$2
+    _debug "function:${FUNCNAME[0]}"
+    _debug "Getting record info for ${RECORD_ID} in zone ${ZONE_ID}"
+    cf_api GET /client/v4/zones/${ZONE_ID}/dns_records/${RECORD_ID}
+    if [[ $CURL_EXIT_CODE == "200" ]]; then
+        echo $API_OUTPUT | jq '.result'
+    else
+        _error "Couldn't get Record Info, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
+        _error "$MESG - $AP_OUTPUT"
+        exit 1
+    fi
+}
+
+# =====================================
+# -- _cf_record_exists $RECORD_NAME
+# -- Check if record exists
+# =====================================
+cf_api_functions["_cf_record_exists"]="Check if record exists"
+function _cf_record_exists () {
+    echo "Placeholder"
+}
+
+# =====================================
+# -- _validate_record_name $RECORD_NAME
+# -- Validate and normalize DNS record names
+# =====================================
+cf_api_functions["_validate_record_name"]="Validate DNS record name"
+function _validate_record_name () {
+    local RAW_NAME="$1"
+    [[ -z $RAW_NAME ]] && _error "Missing record name" && return 1
+
+    if [[ $RAW_NAME =~ [[:space:]] ]]; then
+        _error "Record name cannot contain whitespace"
+        return 1
+    fi
+
+    local NORMALIZED="${RAW_NAME,,}"
+    # Trim leading whitespace
+    NORMALIZED="${NORMALIZED#${NORMALIZED%%[![:space:]]*}}"
+    # Trim trailing whitespace
+    NORMALIZED="${NORMALIZED%${NORMALIZED##*[![:space:]]}}"
+    NORMALIZED="${NORMALIZED%.}"
+
+    [[ -z $NORMALIZED ]] && _error "Record name cannot be empty" && return 1
+    [[ $NORMALIZED != *.* ]] && _error "Record name must include a zone (e.g., host.example.com)" && return 1
+    (( ${#NORMALIZED} > 253 )) && _error "Record name exceeds 253 characters" && return 1
+
+    IFS='.' read -r -a LABELS <<< "$NORMALIZED"
+    for LABEL in "${LABELS[@]}"; do
+        [[ -z $LABEL ]] && _error "Record name contains empty label" && return 1
+        (( ${#LABEL} > 63 )) && _error "DNS label '$LABEL' exceeds 63 characters" && return 1
+        if [[ $LABEL == -* || $LABEL == *- ]]; then
+            _error "DNS label '$LABEL' cannot start or end with '-'"
+            return 1
+        fi
+        if [[ ! $LABEL =~ ^[a-z0-9-]+$ ]]; then
+            _error "DNS label '$LABEL' has invalid characters"
+            return 1
+        fi
+    done
+
+    echo "$NORMALIZED"
+}
+
+# =====================================
+# -- _cf_derive_zone_from_record $RECORD_NAME
+# -- Find managed zone for a given record
+# =====================================
+cf_api_functions["_cf_derive_zone_from_record"]="Derive zone from record"
+function _cf_derive_zone_from_record () {
+    local RECORD_NAME="$1"
+    [[ -z $RECORD_NAME ]] && _error "Missing record name" && return 1
+
+    local NORMALIZED_NAME
+    NORMALIZED_NAME=$(_validate_record_name "$RECORD_NAME") || return 1
+    local CANDIDATE="$NORMALIZED_NAME"
+
+    while [[ "$CANDIDATE" == *"."* ]]; do
+        local CANDIDATE_ZONE_ID
+        CANDIDATE_ZONE_ID=$(_cf_zone_id "$CANDIDATE" 2>/dev/null)
+        if [[ -n $CANDIDATE_ZONE_ID ]]; then
+            echo "$CANDIDATE|$CANDIDATE_ZONE_ID"
+            return 0
+        fi
+        local NEXT_CANDIDATE="${CANDIDATE#*.}"
+        [[ -z $NEXT_CANDIDATE || $NEXT_CANDIDATE == "$CANDIDATE" ]] && break
+        CANDIDATE="$NEXT_CANDIDATE"
+    done
+
+    _error "No managed zone found for $NORMALIZED_NAME"
+    return 1
+}
+
+# =====================================
+# -- _cf_find_record_by_name $ZONE_ID $RECORD_NAME
+# -- Locate A/CNAME records, prompting when multiple match
+# =====================================
+cf_api_functions["_cf_find_record_by_name"]="Find A/CNAME record by name"
+function _cf_find_record_by_name () {
+    local ZONE_ID="$1"
+    local RECORD_NAME="$2"
+
+    [[ -z $ZONE_ID ]] && _error "Missing zone ID" && return 1
+    [[ -z $RECORD_NAME ]] && _error "Missing record name" && return 1
+
+    _debug "Searching for record $RECORD_NAME in zone $ZONE_ID"
+    cf_api GET /client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}
+    if [[ $CURL_EXIT_CODE != "200" ]]; then
+        _error "Failed to query DNS records for zone $ZONE_ID"
+        return 1
+    fi
+
+    local FILTERED_JSON
+    FILTERED_JSON=$(echo "$API_OUTPUT" | jq '[.result[] | select(.type == "A" or .type == "CNAME")]')
+    local MATCH_COUNT
+    MATCH_COUNT=$(echo "$FILTERED_JSON" | jq 'length')
+
+    if [[ $MATCH_COUNT -eq 0 ]]; then
+        _error "No A or CNAME records named $RECORD_NAME were found"
+        return 1
+    fi
+
+    local SELECTED_RECORD_JSON
+    if [[ $MATCH_COUNT -eq 1 ]]; then
+        SELECTED_RECORD_JSON=$(echo "$FILTERED_JSON" | jq '.[0]')
+    else
+        _running2 "Multiple A/CNAME records found for $RECORD_NAME"
+        echo ""
+        printf "%-4s %-6s %-45s %-6s %-34s\n" "#" "Type" "Content" "Proxy" "Record ID"
+        printf "%s\n" "$(printf '%0.s-' {1..100})"
+        echo "$FILTERED_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value.type)\t\(.value.content)\t\(.value.proxied)\t\(.value.id)"' | while IFS=$'\t' read -r IDX TYPE CONTENT PROXIED RID; do
+            printf "%-4s %-6s %-45s %-6s %-34s\n" "$((IDX+1))" "$TYPE" "${CONTENT}" "$PROXIED" "$RID"
+        done
+
+        local SELECTION=""
+        while true; do
+            read -r -p "Select record [1-${MATCH_COUNT}]: " SELECTION
+            [[ -z $SELECTION ]] && continue
+            if [[ $SELECTION =~ ^[0-9]+$ ]] && (( SELECTION >= 1 && SELECTION <= MATCH_COUNT )); then
+                local INDEX=$((SELECTION-1))
+                SELECTED_RECORD_JSON=$(echo "$FILTERED_JSON" | jq ".[${INDEX}]")
+                break
+            else
+                _warning "Invalid selection"
+            fi
+        done
+    fi
+
+    echo "$SELECTED_RECORD_JSON" | jq -r '"\(.id)|\(.type)|\(.name)|\(.content)|\(.ttl)|\(.proxied)"'
+}
 
 # =============================================================================
 # -- Account Functions

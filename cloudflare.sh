@@ -891,26 +891,31 @@ account)
 # =================================================================================================
 proxy)
 	_debug "sub-command: proxy ${*}"
-	RECORD_NAME=$1
-	if [[ -z "$RECORD_NAME" ]]; then
+	RECORD_INPUT=$1
+	if [[ -z "$RECORD_INPUT" ]]; then
 		help usage
 		_die "Missing record name for proxy command" 1
 	fi
 
 	_pre_flight_check
-	_debug "Running with API_METHOD:$API_METHOD" 
+	_debug "Running with API_METHOD:$API_METHOD"
 
-	_running "Looking up record: $RECORD_NAME"
-	if ! findout_record "$RECORD_NAME" "" 1; then
-		_die "Record not found: $RECORD_NAME" 1
+	RECORD_NAME=$(_validate_record_name "$RECORD_INPUT") || _die "Invalid record name: $RECORD_INPUT"
+
+	_running "Deriving zone for: $RECORD_NAME"
+	ZONE_DATA=$(_cf_derive_zone_from_record "$RECORD_NAME") || _die "Unable to find managed zone for $RECORD_NAME"
+	IFS='|' read -r DERIVED_ZONE DERIVED_ZONE_ID <<< "$ZONE_DATA"
+
+	_running2 "Zone identified: $DERIVED_ZONE ($DERIVED_ZONE_ID)"
+	RECORD_DATA=$(_cf_find_record_by_name "$DERIVED_ZONE_ID" "$RECORD_NAME") || _die "No eligible A/CNAME records found for $RECORD_NAME"
+	IFS='|' read -r RECORD_ID RECORD_TYPE RECORD_FQDN RECORD_CONTENT RECORD_TTL RECORD_PROXIED <<< "$RECORD_DATA"
+
+	if [[ "$RECORD_TYPE" != "A" && "$RECORD_TYPE" != "CNAME" ]]; then
+		_die "Record $RECORD_FQDN is type $RECORD_TYPE and cannot be proxied"
 	fi
 
-	# At this point findout_record has set: zone, zone_id, record_id, record_type, record_ttl, record_content
-	_debug "Found record: zone=$zone zone_id=$zone_id id=$record_id type=$record_type ttl=$record_ttl content=$record_content"
-
-	# Get current proxied status for the record
-	current_proxied=$(call_cf_v4 GET /zones/${zone_id}/dns_records/${record_id} -- .result %"%s" ,proxied)
-	if [[ "$current_proxied" == "true" ]]; then
+	_debug "Found record: zone=$DERIVED_ZONE zone_id=$DERIVED_ZONE_ID id=$RECORD_ID type=$RECORD_TYPE ttl=$RECORD_TTL content=$RECORD_CONTENT proxied=$RECORD_PROXIED"
+	if [[ "$RECORD_PROXIED" == "true" ]]; then
 		target_proxied="false"
 		action="unproxy"
 	else
@@ -918,12 +923,15 @@ proxy)
 		action="proxy"
 	fi
 
-	_running2 "Record: $RECORD_NAME ($record_type) -> currently proxied=$current_proxied"
-	_read_answer "Do you want to $action this record? [y/N] "
+	_running2 "Record: $RECORD_FQDN ($RECORD_TYPE) -> currently proxied=$RECORD_PROXIED"
+	read -r -p "Do you want to $action this record? [y/N] " ANSWER
 	case "$ANSWER" in
 		[yY]|[yY][eE][sS])
 			_running2 "Updating record to proxied=$target_proxied"
-			call_cf_v4 PATCH /zones/${zone_id}/dns_records/${record_id} -- '&>{"proxied":'"$target_proxied"'}'
+			UPDATE_BODY='{"proxied":'"$target_proxied"'}'
+			cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
+			NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
+			_success "Record $RECORD_FQDN proxied=$NEW_STATE"
 			;;
 		*)
 			_running2 "Aborted by user; no changes made."
@@ -977,6 +985,9 @@ pass)
 # ---------------
 # -- help command
 # ---------------
+functions)
+	_list_core_functions
+	;;
 help)
 	help usage
 	;;
