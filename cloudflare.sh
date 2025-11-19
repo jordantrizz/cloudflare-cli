@@ -71,6 +71,9 @@ fi
 # -- Debug full command (post-option parsing)
 CMD_ALL="${*}"
 _running "Running: ${CMD_ALL}"
+if [[ -n "$API_PROFILE" ]]; then
+	_running2 "Using profile: $API_PROFILE"
+fi
 
 # =================================================================================================
 # -- Process Commands
@@ -89,6 +92,7 @@ show|list)
 
 	# -- zone
 	zone)		
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
 		DOMAIN="$1"
 		_cf_zone_exists "$DOMAIN"
@@ -105,6 +109,7 @@ show|list)
 		;;
 	# -- zone
 	zones)
+		_pre_flight_check CF_
         # -- Max per page=1000 and max results = 2000
         # TODO figure out how to get all zones in one call, or warn there is more than 1000 and add an option for second set of results etc.
 		#call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers		
@@ -113,6 +118,7 @@ show|list)
 
 	# -- settings
 	setting|settings)		
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help show; _die "Missing sub-command for $CMD2"; }
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
@@ -133,6 +139,7 @@ show|list)
 
 	# -- record
 	record|records)
+		_pre_flight_check CF_
 		_running "Running: cloudflare $CMD1 records $*"
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
 		CLI_ZONE="$1"
@@ -148,9 +155,11 @@ show|list)
 
 	# -- access-rules
 	access-rules|listing|listings|blocking|blockings)
+		_pre_flight_check CF_
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	email-routing)
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help show; _die "Missing zone for $CMD2"; }
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
@@ -183,7 +192,7 @@ add)
 	case "$CMD2" in
 	record)		
 		[ $# -lt 4 ] && { help add record;_die "Missing arguments - $CMD_ALL"; }
-		_pre_flight_check
+		_pre_flight_check CF_
 		_debug "Running with API_METHOD: $API_METHOD"
 		ZONE=$1
 		shift
@@ -300,6 +309,7 @@ add)
 		;;
 
 	whitelist|blacklist|block|challenge)
+		_pre_flight_check CF_
 		trg=$1
 		trg_type=''
 		shift
@@ -326,6 +336,7 @@ add)
 		;;
 
 	zone)		
+		_pre_flight_check CF_
 		# Usage: cloudflare add zone <zone> [account-id] 
 		DOMAIN="$1"
 		ACCOUNT_ID="$2"
@@ -386,6 +397,7 @@ delete)
 	shift
 	case "$CMD2" in
 	record)
+		_pre_flight_check CF_
 		prm1=$1
 		prm2=$2
 		shift
@@ -432,6 +444,7 @@ delete)
 		;;
 
 	listing)
+		_pre_flight_check CF_
 		[ -z "$1" ] && _die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
 		while read ruleid trg notes; do
@@ -447,6 +460,7 @@ delete)
 		;;
 
 	zone)
+		_pre_flight_check CF_
 		if [ $# != 1 ]
 		then
 			_die "Usage: cloudflare delete zone <name>"
@@ -500,6 +514,7 @@ change|set)
 	case "$CMD2" in
 	# -- Zone
 	zone)		
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help change; _die "Missing arguments"; }		
 		[ -z "$2" ] && { help change; _die "Missing arguments"; }
 		CLI_ZONE="$1"
@@ -562,6 +577,7 @@ change|set)
 		;;
 
 	record)
+		_pre_flight_check CF_
 	[ -z "$1" ] && { help change; _die "Missing arguments"; }
 		record_name=$1
 		shift
@@ -640,6 +656,7 @@ clear)
 	cache)		
 		shift
 		[ -z "$1" ] && { help clear; exit 1;}
+		_pre_flight_check CF_
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID=$(_cf_zone_id "$CLI_ZONE")
@@ -658,6 +675,7 @@ clear)
 invalidate)
 	if [ -n "$1" ]
 	then
+		_pre_flight_check CF_
 		urls=''
 		zone_id=''
 		for url in "${*[@]}"; do
@@ -830,11 +848,13 @@ search)
 	shift
 	case "$CMD2" in
 	zone)
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help search; _die "Missing zone name"; }
 		_running2 "Searching for zone $1"
 		zone_search "$1"
 		;;
 	zones)
+		_pre_flight_check CF_
 		[ -z "$1" ] && { help search; _die "Missing search term"; }
 		_running2 "Searching for zones with term $1"
 		zone_search "$1"
@@ -856,6 +876,7 @@ account)
 	shift	
 	case "$CMD" in
 	list)
+		_pre_flight_check CF_
 		_running "Getting list of accounts"
 		ACCOUNT_LIST_OUTPUT="Name\tID\tType\tCreated Date\n"
 		ACCOUNT_LIST_OUTPUT+=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
@@ -863,12 +884,14 @@ account)
 
 		;;
 	detail)
+		_pre_flight_check CF_
 		ACCOUNT_ID=$1
 		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
 		_running "Getting account details for $1"
 		call_cf_v4 GET /accounts/$1
 		;;
 	zones)
+		_pre_flight_check CF_
 		ACCOUNT_ID=$1
 		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
 		_running "Getting zones for account $ACCOUNT_ID"
@@ -879,6 +902,35 @@ account)
 		;;
 	*)
 		_die "Usage: cloudflare account list"
+		;;
+	esac
+	;;
+
+# -----------------------------------------------
+# -- profile command
+# -----------------------------------------------
+profile)
+	CMD=$1
+	shift || true
+	case "$CMD" in
+	list|ls)
+		_pre_flight_check CF_
+		_cf_list_profiles
+		;;
+	show)
+		PROFILE_NAME=$1
+		[ -z "$PROFILE_NAME" ] && _die "Usage: cloudflare profile show <name>"
+		_cf_show_profile "$PROFILE_NAME"
+		;;
+	test)
+		PROFILE_NAME=$1
+		[ -z "$PROFILE_NAME" ] && _die "Usage: cloudflare profile test <name>"
+		API_PROFILE="$PROFILE_NAME"
+		_pre_flight_check CF_
+		test_creds
+		;;
+	*)
+		_die "Usage: cloudflare profile [list|show <name>|test <name>]"
 		;;
 	esac
 	;;
@@ -897,7 +949,7 @@ proxy)
 		_die "Missing record name for proxy command" 1
 	fi
 
-	_pre_flight_check
+	_pre_flight_check CF_
 	_debug "Running with API_METHOD:$API_METHOD"
 
 	RECORD_NAME=$(_validate_record_name "$RECORD_INPUT") || _die "Invalid record name: $RECORD_INPUT"
@@ -948,6 +1000,7 @@ check)
 		shift
 		DOMAIN="$1"
 		[ -z "$DOMAIN" ] && _die "Usage: cloudflare check zone <zone>"
+		_pre_flight_check CF_
 		_cf_zone_exists "$DOMAIN"
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
 		_running2 "Found zone id $ZONE_ID for $DOMAIN"
@@ -980,6 +1033,7 @@ ishex)
 # -- pass command
 # -----------------------------------------------
 pass)	
+	_pre_flight_check CF_
 	call_cf_v4 ${*}
 	;;
 # ---------------

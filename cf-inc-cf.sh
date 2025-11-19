@@ -29,12 +29,13 @@ HELP_VERSION="Version: $VERSION"
 # -----------------------------------------------
 HELP_OPTIONS="Options:
 ---------
-    --details, -d       Display detailed info where possible
-    --debug, -D         Display API debugging info
-    --debug-curl, -DC   Display API debugging info and curl output
-    --quiet, -q         Less verbose
-    -E <email>          Cloudflare Email
-    -T <api_token>      Cloudflare API Token"
+	--details, -d       Display detailed info where possible
+	--debug, -D         Display API debugging info
+	--debug-curl, -DC   Display API debugging info and curl output
+	--quiet, -q         Less verbose
+	-E <email>          Cloudflare Email
+	-T <api_token>      Cloudflare API Token
+	-p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)"
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -104,14 +105,25 @@ Additional Commands:
 	examples - Show Examples
 
 Environment variables:
-	CF_ACCOUNT  -  email address (as -E option)
-	CF_TOKEN    -  API token (as -T option)
+	CF_ACCOUNT       - email address (as -E option)
+	CF_KEY           - global API key for account auth
+	CF_TOKEN         - API token (as -T option)
+	CF_PROFILE       - default profile name (same as --profile)
 
-Configuration file for credentials:
-	Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
-
+Configuration file for credentials (~/.cloudflare):
+	# Default credentials
 	CF_ACCOUNT=example@example.com
-	CF_TOKEN=<token>
+	CF_KEY=global-api-key
+	CF_TOKEN=default-token
+
+	# Named profiles
+	CF_WORK_ACCOUNT=work@example.com
+	CF_WORK_KEY=work-global-key
+	CF_PROD_TOKEN=long-production-token
+
+Examples:
+	cloudflare --profile work show zones
+	cloudflare --profile prod add record example.com A www 203.0.113.10
 
 ${HELP_EXAMPLES}
 

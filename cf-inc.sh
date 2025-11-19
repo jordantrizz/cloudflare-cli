@@ -83,8 +83,8 @@ function _pre_flight_check () {
     [[ -z $PRE_TAG ]] && PRE_TAG="CF_"
 
     # -- Check cloudflare creds
-    _debug "Checking for Cloudflare credentials"
-    _check_cloudflare_creds $PRE_TAG
+    _debug "Checking for Cloudflare credentials (PRE_TAG=$PRE_TAG, API_PROFILE=${API_PROFILE:-})"
+    _check_cloudflare_creds "$PRE_TAG"
 
     # -- Check required
     _debug "Checking for required apps"
@@ -96,57 +96,12 @@ function _pre_flight_check () {
 }
 
 # =====================================
-# -- _check_cloudflare_creds_old $PRE_TAG
-# -- Check for .cloudflare credentials
-# =====================================
-function _check_cloudflare_creds_old () {
-    # -- PRE_TAG is the script, either CF_TS, CF_SPC or CF_
-    local PRE_TAG=$1    
+#!/usr/bin/env bash
 
-    if [[ -n $API_TOKEN ]]; then
-        _running "Found \$API_TOKEN via CLI using for authentication/."        
-        API_TOKEN=$CF_SPC_TOKEN
-    elif [[ -n $API_ACCOUNT ]]; then
-        _running "Found \$API_ACCOUNT via CLI using as authentication."                
-        if [[ -n $API_APIKEY ]]; then
-            _running "Found \$API_APIKEY via CLI using as authentication."                        
-        else
-            _error "Found API Account via CLI, but no API Key found, use -ak...exiting"
-            exit 1
-        fi
-    elif [[ -f "$HOME/.cloudflare" ]]; then
-        _debug "Found .cloudflare file."
-        # shellcheck source=$HOME/.cloudflare
-        source "$HOME/.cloudflare"
-    
-        # -- Check first if we have _ACCOUNT
-        CHECK_CF_ACCOUNT="${PRE_TAG}ACCOUNT"    
-        CHECK_CF_TOKEN="${PRE_TAG}TOKEN"
-        if [[ ${!CHECK_CF_ACCOUNT} ]]; then            
-            API_ACCOUNT=${!CHECK_CF_ACCOUNT}
-            _debug "Found ${PRE_TAG}ACCOUNT = ${API_ACCOUNT} in \$HOME/.cloudflare"            
-            CHECK_CF_KEY="${PRE_TAG}KEY"
-            if [[ ${!CHECK_CF_KEY} ]]; then
-                API_APIKEY=${!CHECK_CF_KEY}
-                _debug "Found ${PRE_TAG}KEY = ${API_APIKEY} in \$HOME/.cloudflare"
-            else
-                _error "No ${PRE_TAG}KEY found in \$HOME/.cloudflare, required for ${PRE_TAG}ACCOUNT"
-                exit 1
-            fi
-        elif [[ ${!CHECK_CF_TOKEN} ]]; then
-            API_TOKEN=${!CHECK_CF_TOKEN}
-            _debug "Found ${PRE_TAG}TOKEN = ${API_TOKEN} in \$HOME/.cloudflare"
-        else
-            _error "No ${PRE_TAG}TOKEN or ${PRE_TAG}KEY found in \$HOME/.cloudflare"
-            exit 1
-        fi
-    fi
-}
-
-# =====================================
-# -- _check_cloudflare_creds_old $PRE_TAG
-# -- Check for .cloudflare credentials
-# =====================================
+# NOTE: _check_cloudflare_creds_old is deprecated in favour of the
+# new multi-profile aware _check_cloudflare_creds implementation.
+# It is kept for backwards compatibility only and should not be
+# used by new code paths.
 function _check_cloudflare_creds_old () {
     _debug "${FUNCNAME[0]} called with PRE_TAG: $1"
     _debug "API_PROFILE: $API_PROFILE"
@@ -273,12 +228,58 @@ function _check_cloudflare_creds_old () {
 # -- _check_cloudflare_creds $PRE_TAG
 # =====================================
 function _check_cloudflare_creds () {
-    _debug "${FUNCNAME[0]} called with PRE_TAG: $1"
+    _debug "${FUNCNAME[0]} called with PRE_TAG: $1 API_PROFILE=${API_PROFILE:-}"
     local PRE_TAG=$1
     local CONFIG="$HOME/.cloudflare"
     local -a available_profiles=()
     local -a profile_descriptions=()
     
+    # If API_PROFILE is explicitly set, try to use it first
+    if [[ -n ${API_PROFILE:-} ]]; then
+        local PROFILE_UPPER
+        PROFILE_UPPER=$(echo "$API_PROFILE" | tr '[:lower:]' '[:upper:]')
+        _debug "Attempting to use explicit API_PROFILE=${PROFILE_UPPER}"
+
+        # First check default-style variables for a special keyword "DEFAULT"
+        if [[ "$PROFILE_UPPER" == "DEFAULT" ]]; then
+            if [[ -n ${CF_ACCOUNT:-} && -n ${CF_KEY:-} ]]; then
+                API_ACCOUNT="$CF_ACCOUNT"
+                API_APIKEY="$CF_KEY"
+                API_METHOD="account"
+                _debug "Using DEFAULT account credentials from CF_ACCOUNT/CF_KEY"
+                return
+            elif [[ -n ${CF_TOKEN:-} ]]; then
+                API_TOKEN="$CF_TOKEN"
+                API_METHOD="token"
+                _debug "Using DEFAULT token credentials from CF_TOKEN"
+                return
+            fi
+        else
+            # Check account/key pair for this profile
+            local account_var="CF_${PROFILE_UPPER}_ACCOUNT"
+            local key_var="CF_${PROFILE_UPPER}_KEY"
+            local token_var="CF_${PROFILE_UPPER}_TOKEN"
+
+            # shellcheck disable=SC2154
+            if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
+                API_ACCOUNT="${!account_var}"
+                API_APIKEY="${!key_var}"
+                API_METHOD="account"
+                _debug "Using profile ${PROFILE_UPPER} (account) : ${API_ACCOUNT}"
+                return
+            elif [[ -n ${!token_var:-} ]]; then
+                API_TOKEN="${!token_var}"
+                API_METHOD="token"
+                _debug "Using profile ${PROFILE_UPPER} (token)"
+                return
+            fi
+        fi
+
+        _error "Profile ${API_PROFILE} not found or incomplete in ${CONFIG}."
+        _error "Check your ~/.cloudflare configuration or omit --profile."
+        exit 1
+    fi
+
     # Check if .cloudflare file exists
     if [[ ! -f "$CONFIG" ]]; then
         _error "No .cloudflare file found at $CONFIG"
@@ -287,7 +288,7 @@ function _check_cloudflare_creds () {
     
     _debug "Processing .cloudflare file: $CONFIG"
     
-    # Source the config file
+    # Source the config file so we can inspect variables
     # shellcheck source=/dev/null
     source "$CONFIG"
     
@@ -318,7 +319,7 @@ function _check_cloudflare_creds () {
     # Find all profile-based configurations
     local profiles
     profiles=$(grep -E "^CF_[A-Z0-9_]+_(ACCOUNT|TOKEN|KEY)=" "$CONFIG" | sed -E 's/^CF_([A-Z0-9_]+)_(ACCOUNT|TOKEN|KEY)=.*/\1/' | sort -u)
-    
+
     for profile in $profiles; do
         local account_var="CF_${profile}_ACCOUNT"
         local key_var="CF_${profile}_KEY"
@@ -382,6 +383,105 @@ function _check_cloudflare_creds () {
             echo "Invalid selection. Please enter a number between 1 and ${#available_profiles[@]}."
         fi
     done
+}
+
+# =====================================
+# -- _cf_list_profiles
+# -- List discovered profiles from ~/.cloudflare in a human-friendly table
+# =====================================
+function _cf_list_profiles () {
+    local CONFIG="$HOME/.cloudflare"
+    if [[ ! -f "$CONFIG" ]]; then
+        _error "No .cloudflare file found at $CONFIG"
+        return 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$CONFIG"
+
+    printf "%s\n" "Available Cloudflare profiles:" 
+    printf "%-20s %-10s %s\n" "Profile" "Type" "Details"
+    printf "%-20s %-10s %s\n" "------" "----" "-------"
+
+    # Default account/key
+    if [[ -n ${CF_ACCOUNT:-} && -n ${CF_KEY:-} ]]; then
+        printf "%-20s %-10s %s\n" "DEFAULT" "account" "CF_ACCOUNT=${CF_ACCOUNT}"
+    fi
+    # Default token
+    if [[ -n ${CF_TOKEN:-} ]]; then
+        printf "%-20s %-10s %s\n" "DEFAULT" "token" "CF_TOKEN (token set)"
+    fi
+
+    local profiles
+    profiles=$(grep -E "^CF_[A-Z0-9_]+_(ACCOUNT|TOKEN|KEY)=" "$CONFIG" | sed -E 's/^CF_([A-Z0-9_]+)_(ACCOUNT|TOKEN|KEY)=.*/\1/' | sort -u)
+    for profile in $profiles; do
+        local account_var="CF_${profile}_ACCOUNT"
+        local key_var="CF_${profile}_KEY"
+        local token_var="CF_${profile}_TOKEN"
+
+        if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
+            printf "%-20s %-10s %s\n" "$profile" "account" "${!account_var}"
+        elif [[ -n ${!token_var:-} ]]; then
+            printf "%-20s %-10s %s\n" "$profile" "token" "token set"
+        fi
+    done
+}
+
+# =====================================
+# -- _cf_show_profile <name>
+# -- Show detailed info for a single profile
+# =====================================
+function _cf_show_profile () {
+    local NAME="$1"
+    local CONFIG="$HOME/.cloudflare"
+    if [[ -z "$NAME" ]]; then
+        _error "Usage: cloudflare profile show <name>"
+        return 1
+    fi
+    if [[ ! -f "$CONFIG" ]]; then
+        _error "No .cloudflare file found at $CONFIG"
+        return 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$CONFIG"
+
+    local PROFILE_UPPER
+    PROFILE_UPPER=$(echo "$NAME" | tr '[:lower:]' '[:upper:]')
+
+    if [[ "$PROFILE_UPPER" == "DEFAULT" ]]; then
+        echo "Profile: DEFAULT"
+        if [[ -n ${CF_ACCOUNT:-} && -n ${CF_KEY:-} ]]; then
+            echo "  Type   : account"
+            echo "  Email  : ${CF_ACCOUNT}"
+            echo "  Key    : ********${CF_KEY: -4}"
+        fi
+        if [[ -n ${CF_TOKEN:-} ]]; then
+            echo "  Type   : token"
+            echo "  Token  : ********${CF_TOKEN: -4}"
+        fi
+        return 0
+    fi
+
+    local account_var="CF_${PROFILE_UPPER}_ACCOUNT"
+    local key_var="CF_${PROFILE_UPPER}_KEY"
+    local token_var="CF_${PROFILE_UPPER}_TOKEN"
+
+    if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
+        echo "Profile: ${PROFILE_UPPER}"
+        echo "  Type   : account"
+        echo "  Email  : ${!account_var}"
+        echo "  Key    : ********${!key_var: -4}"
+        return 0
+    elif [[ -n ${!token_var:-} ]]; then
+        echo "Profile: ${PROFILE_UPPER}"
+        echo "  Type   : token"
+        echo "  Token  : ********${!token_var: -4}"
+        return 0
+    fi
+
+    _error "Profile ${NAME} not found or incomplete in ${CONFIG}"
+    return 1
 }
 
 # =====================================
