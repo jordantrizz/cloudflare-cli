@@ -742,8 +742,8 @@ function call_cf_v4 () {
 
 	# -- Testing check
 	if [[ $TEST == "true" ]]; then
-		_debug "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
-		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
+		_debug "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: [MASKED]\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
+		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: [MASKED]\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
 		CURL_OUTPUT_GLOBAL='{"success": true,"message": "Operation completed successfully"}'
 		return "$CURL_EXIT_CODE"
 	else

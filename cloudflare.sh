@@ -214,6 +214,8 @@ add)
 
 		[ -n "$proxied" ] || proxied=true
 		[ -n "$ttl" ] || ttl=1
+		# Convert "auto" to 1 for TTL
+		[[ "$ttl" == "auto" ]] && ttl=1
 		[ -n "$prio" ] || prio=10
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		

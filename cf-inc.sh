@@ -74,6 +74,33 @@ function _debug () {
 }
 
 # =====================================
+# -- _mask_sensitive
+# -- Mask sensitive credentials for logging
+# -- Usage: _mask_sensitive "value"
+# -- Returns: masked string (shows first 4 and last 4 chars)
+# =====================================
+function _mask_sensitive() {
+    local value="$1"
+    local length=${#value}
+    
+    if [[ -z "$value" ]]; then
+        echo ""
+        return
+    fi
+    
+    # If value is short, just mask everything
+    if [[ $length -le 8 ]]; then
+        echo "********"
+        return
+    fi
+    
+    # Show first 4 and last 4 characters
+    local prefix="${value:0:4}"
+    local suffix="${value: -4}"
+    echo "${prefix}****${suffix}"
+}
+
+# =====================================
 # -- _pre_flight_check
 # -- Check for .cloudflare credentials based on script
 # =====================================
@@ -121,11 +148,11 @@ function _check_cloudflare_creds_old () {
                 API_ACCOUNT=$(grep "^${PRE_TAG}ACCOUNT_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
                 API_APIKEY=$(grep "^${PRE_TAG}KEY_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
                 API_METHOD="account"
-                _debug "Found profile $API_PROFILE: API_ACCOUNT = ${API_ACCOUNT} and API_APIKEY = ${API_APIKEY}"
+                _debug "Found profile $API_PROFILE: API_ACCOUNT = ${API_ACCOUNT} and API_APIKEY = $(_mask_sensitive "${API_APIKEY}")"
             elif grep -q "^${PRE_TAG}TOKEN_${API_PROFILE}=" "$CONFIG"; then
                 API_TOKEN=$(grep "^${PRE_TAG}TOKEN_${API_PROFILE}=" "$CONFIG" | cut -d= -f2-)
                 API_METHOD="token"
-                _debug "Found profile $API_PROFILE: API_TOKEN = ${API_TOKEN}"
+                _debug "Found profile $API_PROFILE: API_TOKEN = $(_mask_sensitive "${API_TOKEN}")"
             else
                 _error "Profile $API_PROFILE not found in $CONFIG"
                 exit 1
@@ -170,7 +197,7 @@ function _check_cloudflare_creds_old () {
                 API_METHOD="account"
                 if [[ $ACCOUNT_PROFILES == *"KEY"* ]]; then
                     API_APIKEY=$(grep "^${PRE_TAG}KEY=" "$CONFIG" | cut -d= -f2-)
-                    _debug "Selected profile: $PROFILE_NAME with API_ACCOUNT = ${API_ACCOUNT} and API_KEY = ${API_APIKEY} and API_METHOD = ${API_METHOD} from $CONFIG"
+                    _debug "Selected profile: $PROFILE_NAME with API_ACCOUNT = ${API_ACCOUNT} and API_KEY = $(_mask_sensitive "${API_APIKEY}") and API_METHOD = ${API_METHOD} from $CONFIG"
                 else
                     _error "No ${PRE_TAG}KEY found in $CONFIG, required for ${PRE_TAG}ACCOUNT"
                     exit 1
@@ -179,7 +206,7 @@ function _check_cloudflare_creds_old () {
                 API_APIKEY=$(grep "^${PRE_TAG}TOKEN=" "$CONFIG" | cut -d= -f2-)
                 PROFILE_NAME=$(echo "$ACCOUNT_PROFILES" | grep "^${PRE_TAG}ACCOUNT")
                 API_METHOD="token"
-                _debug "Selected profile: $PROFILE_NAME with API_APIKEY = ${API_APIKEY} and API_METHOD = ${API_METHOD} from $CONFIG"
+                _debug "Selected profile: $PROFILE_NAME with API_APIKEY = $(_mask_sensitive "${API_APIKEY}") and API_METHOD = ${API_METHOD} from $CONFIG"
             else
                 _error "No ${PRE_TAG}ACCOUNT or ${PRE_TAG}TOKEN found in $CONFIG"
                 exit 1
@@ -196,7 +223,7 @@ function _check_cloudflare_creds_old () {
                         API_APIKEY=$(grep "^${PRE_TAG}KEY_${PROFILE_NAME}=" "$CONFIG" | cut -d= -f2-)
                         if [[ -n $API_APIKEY ]]; then
                             API_METHOD="account"
-                            _debug "Selected ${PROFILE_NAME} = API_ACCOUNT: ${API_ACCOUNT} and API_APIKEY: ${API_APIKEY} and API_METHOD: ${API_METHOD} from $CONFIG"
+                            _debug "Selected ${PROFILE_NAME} = API_ACCOUNT: ${API_ACCOUNT} and API_APIKEY: $(_mask_sensitive "${API_APIKEY}") and API_METHOD: ${API_METHOD} from $CONFIG"
                         else
                             _error "No ${PRE_TAG}KEY_${PROFILE_NAME} found in $CONFIG, required for ${profile}ACCOUNT"
                             exit 1
@@ -204,7 +231,7 @@ function _check_cloudflare_creds_old () {
                     elif [[ $profile == *"TOKEN"* ]]; then
                         API_TOKEN=$(grep "^${profile}=" "$CONFIG" | cut -d= -f2-)
                         API_METHOD="token"
-                        _debug "Selected ${PROFILE_NAME} = API_APIKEY: ${API_APIKEY} and API_METHOD: ${API_METHOD} from $CONFIG"
+                        _debug "Selected ${PROFILE_NAME} = API_TOKEN: $(_mask_sensitive "${API_TOKEN}") and API_METHOD: ${API_METHOD} from $CONFIG"
                     else
                         _error "No ${profile}ACCOUNT or ${profile}TOKEN found in $CONFIG"
                         exit 1
@@ -297,7 +324,7 @@ function _check_cloudflare_creds () {
         if [[ -n ${CF_KEY:-} ]]; then
             available_profiles+=("DEFAULT_ACCOUNT")
             profile_descriptions+=("Default - Account API (${CF_ACCOUNT})")
-            _debug "Found default account: CF_ACCOUNT=${CF_ACCOUNT} CF_KEY=${CF_KEY}"
+            _debug "Found default account: CF_ACCOUNT=${CF_ACCOUNT} CF_KEY=$(_mask_sensitive "${CF_KEY}")"
         else
             available_profiles+=("DEFAULT_ACCOUNT_INCOMPLETE")
             profile_descriptions+=("Default - Account API (${CF_ACCOUNT}) - (_KEY Missing)")
@@ -313,7 +340,7 @@ function _check_cloudflare_creds () {
     if [[ -n ${CF_TOKEN:-} ]]; then
         available_profiles+=("DEFAULT_TOKEN")
         profile_descriptions+=("Default - Token API")
-        _debug "Found default token: CF_TOKEN=${CF_TOKEN}"
+        _debug "Found default token: CF_TOKEN=$(_mask_sensitive "${CF_TOKEN}")"
     fi
     
     # Find all profile-based configurations
@@ -330,7 +357,7 @@ function _check_cloudflare_creds () {
             if [[ -n ${!key_var:-} ]]; then
                 available_profiles+=("${profile}_ACCOUNT")
                 profile_descriptions+=("${profile} - Account API (${!account_var})")
-                _debug "Found profile account: ${account_var}=${!account_var} ${key_var}=${!key_var}"
+                _debug "Found profile account: ${account_var}=${!account_var} ${key_var}=$(_mask_sensitive "${!key_var}")"
             else
                 available_profiles+=("${profile}_ACCOUNT_INCOMPLETE")
                 profile_descriptions+=("${profile} - Account API (${!account_var}) - (_KEY Missing)")
@@ -346,7 +373,7 @@ function _check_cloudflare_creds () {
         if [[ -n ${!token_var:-} ]]; then
             available_profiles+=("${profile}_TOKEN")
             profile_descriptions+=("${profile} - Token API")
-            _debug "Found profile token: ${token_var}=${!token_var}"
+            _debug "Found profile token: ${token_var}=$(_mask_sensitive "${!token_var}")"
         fi
     done
     
@@ -490,17 +517,21 @@ function _cf_show_profile () {
 function _set_credentials_from_profile() {
     local profile="$1"
     
+    _debug "Setting credentials from profile: $profile"
+    
     case "$profile" in
         "DEFAULT_ACCOUNT")
             API_ACCOUNT="$CF_ACCOUNT"
             API_APIKEY="$CF_KEY"
             API_METHOD="account"
-            _debug "Set credentials: API_ACCOUNT=${API_ACCOUNT}, API_METHOD=${API_METHOD}"
+            _debug "Set credentials: API_ACCOUNT=${API_ACCOUNT}, API_APIKEY=$(_mask_sensitive "${API_APIKEY}"), API_METHOD=${API_METHOD}"
+            export API_ACCOUNT API_APIKEY API_METHOD
             ;;
         "DEFAULT_TOKEN")
             API_TOKEN="$CF_TOKEN"
             API_METHOD="token"
-            _debug "Set credentials: API_TOKEN=${API_TOKEN}, API_METHOD=${API_METHOD}"
+            _debug "Set credentials: API_TOKEN=$(_mask_sensitive "${API_TOKEN}"), API_METHOD=${API_METHOD}"
+            export API_TOKEN API_METHOD
             ;;
         *"_ACCOUNT")
             local profile_name="${profile%_ACCOUNT}"
@@ -509,14 +540,16 @@ function _set_credentials_from_profile() {
             API_ACCOUNT="${!account_var}"
             API_APIKEY="${!key_var}"
             API_METHOD="account"
-            _debug "Set credentials: API_ACCOUNT=${API_ACCOUNT}, API_METHOD=${API_METHOD}"
+            _debug "Set credentials: profile=${profile_name}, API_ACCOUNT=${API_ACCOUNT}, API_APIKEY=$(_mask_sensitive "${API_APIKEY}"), API_METHOD=${API_METHOD}"
+            export API_ACCOUNT API_APIKEY API_METHOD
             ;;
         *"_TOKEN")
             local profile_name="${profile%_TOKEN}"
             local token_var="CF_${profile_name}_TOKEN"
             API_TOKEN="${!token_var}"
             API_METHOD="token"
-            _debug "Set credentials: API_TOKEN=${API_TOKEN}, API_METHOD=${API_METHOD}"
+            _debug "Set credentials: profile=${profile_name}, API_TOKEN=$(_mask_sensitive "${API_TOKEN}"), API_METHOD=${API_METHOD}"
+            export API_TOKEN API_METHOD
             ;;
         *"_INCOMPLETE")
             _error "Selected profile is incomplete and cannot be used"

@@ -115,15 +115,15 @@ function cf_api() {
             API_PATH="${API_PATH}?page=${PAGE}&per_page=${PER_PAGE}"
         fi
     fi
-    _debug "API_PATH: $API_PATH API_METHOD: $API_METHOD API_TOKEN: $API_TOKEN API_APIKEY: $API_APIKEY API_ACCOUNT: $API_ACCOUNT"
+    _debug "API_PATH: $API_PATH API_METHOD: $API_METHOD API_TOKEN: $(_mask_sensitive "${API_TOKEN}") API_APIKEY: $(_mask_sensitive "${API_APIKEY}") API_ACCOUNT: $API_ACCOUNT"
 
     # -- Create headers for curl
     if [[ -n $API_TOKEN ]]; then
         CURL_HEADERS=("-H" "Authorization: Bearer ${API_TOKEN}")
-        _debug "Using \$API_TOKEN as 'Authorization: Bearer'. \$CURL_HEADERS: ${CURL_HEADERS[*]}"        
+        _debug "Using \$API_TOKEN as 'Authorization: Bearer' (token masked)"        
     elif [[ -n $API_ACCOUNT ]]; then
         CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" -H "X-Auth-Email: ${API_ACCOUNT}")
-        _debug "Using \$API_APIKEY as X-Auth-Key. \$CURL_HEADERS: ${CURL_HEADERS[*]}"        
+        _debug "Using \$API_APIKEY as X-Auth-Key (key masked)"        
     else
         _error "No API Token or API Key found...major error...exiting"
         exit 1
