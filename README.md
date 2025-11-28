@@ -1,10 +1,7 @@
-## DESCRIPTION
+# cloudflare-cli
+CLI utility managing CloudFlare services highly focused on DNS using CloudFlare API
 
-CLI utility managing CloudFlare services - highly focused on DNS - 
-using CloudFlare API
-
-
-## SYNOPSIS
+# Usage
 
 ```
 Usage: cloudflare [Options] <command> <parameters>
@@ -20,8 +17,31 @@ Environment variables:
 Enter "cloudflare help" to list available commands.
 ```
 
+# Config
+## Config Global API
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+   ```
+   CF_ACCOUNT=<your_email>
+   CF_KEY=<your_api_token>
+   ```
+## Config Token
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+3. ```
+   CF_TOKEN=<your_api_token>
+   ```
+## Config Profiles
+You can create multiple profiles to manage different CloudFlare accounts or configurations. Each profile can have its own email and API token.
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+3. ```
+   CF_ACCOUNT_<PROFILE>=<your_email>
+   CF_KEY_<PROFILE>=<your_api_token>
+   CF_TOKEN_<PROFILE>=<your_api_token>
+   ```
 
-## COMMAND REFERENCE
+# Commands
 
 ```
 $ cloudflare help

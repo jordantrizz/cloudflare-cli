@@ -12,24 +12,11 @@ DEBUG=0
 DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 # Clear debug log
 echo "" > $DEBUG_FILE_PATH
-details=0
 QUIET=0
 NL=$'\n'
 TA=$'\t'
 CF_API_ENDPOINT=https://api.cloudflare.com/client/v4
 APIv4_ENDPOINT=$CF_API_ENDPOINT # Remove eventually
-
-# -- Colors
-BLACK="\e[30m"
-RED="\e[31m"
-GREEN="\e[32m"
-CYAN="\e[36m"
-BLUEBG="\e[44m"
-YELLOW="\e[33m"
-YELLOWBG="\e[43m"
-DARKGREYBG="\e[100m"
-DARKGRAYFG="\e[90m"
-ECOL="\e[0m"
 
 # ===============================================
 # -- Help Files
@@ -42,12 +29,13 @@ HELP_VERSION="Version: $VERSION"
 # -----------------------------------------------
 HELP_OPTIONS="Options:
 ---------
-   --details, -d       Display detailed info where possible
-   --debug, -D         Display API debugging info
-   --debug-curl, -DC   Display API debugging info and curl output
-   --quiet, -q         Less verbose
-   -E <email>          Cloudflare Email
-   -T <api_token>      Cloudflare API Token"
+	--details, -d       Display detailed info where possible
+	--debug, -D         Display API debugging info
+	--debug-curl, -DC   Display API debugging info and curl output
+	--quiet, -q         Less verbose
+	-E <email>          Cloudflare Email
+	-T <api_token>      Cloudflare API Token
+	-p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)"
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -117,14 +105,25 @@ Additional Commands:
 	examples - Show Examples
 
 Environment variables:
-	CF_ACCOUNT  -  email address (as -E option)
-	CF_TOKEN    -  API token (as -T option)
+	CF_ACCOUNT       - email address (as -E option)
+	CF_KEY           - global API key for account auth
+	CF_TOKEN         - API token (as -T option)
+	CF_PROFILE       - default profile name (same as --profile)
 
-Configuration file for credentials:
-	Create a file in \$HOME/.cloudflare with both CF_ACCOUNT and CF_TOKEN defined.
-
+Configuration file for credentials (~/.cloudflare):
+	# Default credentials
 	CF_ACCOUNT=example@example.com
-	CF_TOKEN=<token>
+	CF_KEY=global-api-key
+	CF_TOKEN=default-token
+
+	# Named profiles
+	CF_WORK_ACCOUNT=work@example.com
+	CF_WORK_KEY=work-global-key
+	CF_PROD_TOKEN=long-production-token
+
+Examples:
+	cloudflare --profile work show zones
+	cloudflare --profile prod add record example.com A www 203.0.113.10
 
 ${HELP_EXAMPLES}
 
@@ -642,53 +641,6 @@ json_decode() {
 # TODO - Add jq_decode function that utilizes jq versus PHP
 
 # -----------------------------------------------
-# -- Messaging Functions
-# -----------------------------------------------
-_error () { echo -e "${RED}** ERROR ** - $1 ${ECOL}"; }
-_success () { echo -e "${GREEN}** SUCCESS ** - ${*} ${ECOL}"; }
-_warning () { echo -e "${YELLOW}** WARNING ** - ${*} ${ECOL}"; }
-_notice () { echo -e "${CYAN}** NOTICE ** - ${*} ${ECOL}"; }
-_running () { echo -e "${YELLOWBG}${BLACK}${*}${ECOL}"; }
-_running2 () { echo -e "${DARKGREYBG}${*}${ECOL}"; }
-_running3 () { echo -e "${DARKGRAYFG}${*}${ECOL}"; }
-_creating () {  echo -e "${DARKGREYBG}${*}${ECOL}"; }
-_separator () {  echo -e "${YELLOWBG}****************${ECOL}"; }
-
-# -----------------------------------------------
-# -- debug - ( $MESSAGE, $LEVEL)
-# -----------------------------------------------
-function _debug () {		
-	local DEBUG_MSG="$@"
-	local DEBUG_MSG_OUTPUT=""
-
-	# Get previous calling function
-	local PREV_CALLER=$(caller 1)
-	local PREV_CALLER_NAME=$(echo "$PREV_CALLER" | awk '{print $2}')
-
-	if [ "$DEBUG" = "1" ]; then
-		if [[ $DEBUG_CURL_OUTPUT = "1" ]]; then
-			DEBUG_MSG_OUTPUT+="CURL_OUTPUT: $CURL_OUTPUT_GLOBAL"
-		fi
-		for arg in "$@"; do
-			if [[ "$(declare -p "$arg" 2>/dev/null)" =~ "declare -a" ]]; then
-				DEBUG_MSG_OUTPUT+="Array contents:"
-				for item in "${arg[@]}"; do
-				DEBUG_MSG_OUTPUT+="${item}"
-				done
-			else
-				DEBUG_MSG_OUTPUT+="${arg}"
-			fi
-		done
-		echo -e "${CYAN}** DEBUG: ${PREV_CALLER_NAME}: ${DEBUG_MSG_OUTPUT}${ECOL}" >&2
-	fi
-
-	if [[ $DEBUG_FILE == "1" ]]; then
-		DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
-		echo -e "${PREV_CALLER_NAME}:${DEBUG_MSG_OUTPUT}" >> "$DEBUG_FILE_PATH"
-	fi
-}
-
-# -----------------------------------------------
 # -- _die
 # -----------------------------------------------
 function _die () {
@@ -720,7 +672,7 @@ function _escape_string () {
 # ===============================================
 function _check_quiet () {
     if [[ $QUIET == "1" ]]; then
-        echo -e "${CYAN}** DEBUG: Quiet is on${ECOL}"
+        echo -e "${CYAN}** DEBUG: Quiet is on${NC}"
     fi
 }
 
