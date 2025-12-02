@@ -1,0 +1,9 @@
+# Sample zones file for multi-domain testing
+# Format: one zone per line, comments start with #
+
+# Example zones (replace with real zones for testing)
+example.com
+example.org
+# example.net  # commented out zone
+
+test-domain.com

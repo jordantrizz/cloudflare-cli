@@ -35,7 +35,12 @@ HELP_OPTIONS="Options:
 	--quiet, -q         Less verbose
 	-E <email>          Cloudflare Email
 	-T <api_token>      Cloudflare API Token
-	-p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)"
+	-p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
+
+Multi-Zone Options:
+	-z, --zone <zone>   Specify zone (can be repeated for multiple zones)
+	-f, --zones-file    Read zones from file (one per line, # comments)
+	--continue-on-error Continue processing despite individual zone failures"
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -177,11 +182,19 @@ www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
 *       3600 A         198.51.100.2       ;  #IDSTRING
 ...
 
-$ cloudflare show records example.net
-www     auto CNAME     example.net.       ; proxiable,proxied #IDSTRING
-@       auto A         198.51.100.1       ; proxiable,proxied #IDSTRING
-*       3600 A         198.51.100.2       ;  #IDSTRING
-..."
+Multi-Zone Examples:
+
+# Process multiple zones specified on command line
+$ cloudflare -z example.com -z example.org clear cache
+
+# Process zones from a file
+$ cloudflare -f zones.txt clear cache
+
+# Combine both methods
+$ cloudflare -z extra.com -f zones.txt clear cache
+
+# Continue despite errors
+$ cloudflare -f zones.txt --continue-on-error clear cache"
 
 # -----------------------------------------------
 # -- HELP_USAGE

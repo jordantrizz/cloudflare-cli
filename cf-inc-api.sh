@@ -1855,3 +1855,192 @@ function delete_turnstile () {
         exit 1
     fi
 }
+
+# =============================================================================
+# -- Multi-Zone Processing Functions (v1.4.2)
+# =============================================================================
+
+# Global arrays for multi-zone processing
+declare -a ZONES_FAILED=()
+declare -a ZONES_SUCCESS=()
+MULTI_ZONE_LOG=""
+MULTI_ZONE_DELAY=5
+
+# =====================================
+# -- _parse_zones_file $FILE
+# -- Read and validate zone list from file
+# -- File format: one zone name or ID per line, # comments allowed
+# =====================================
+cf_api_functions["_parse_zones_file"]="Parse zones from file"
+function _parse_zones_file() {
+    local FILE="$1"
+    local -a ZONES=()
+
+    [[ -z "$FILE" ]] && _error "Missing zones file argument" && return 1
+    [[ ! -f "$FILE" ]] && _error "Zones file not found: $FILE" && return 1
+    [[ ! -r "$FILE" ]] && _error "Zones file not readable: $FILE" && return 1
+
+    _debug "Parsing zones file: $FILE"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Skip empty lines and comments
+        line="${line%%#*}"          # Remove comments
+        line="${line#"${line%%[![:space:]]*}"}"  # Trim leading whitespace
+        line="${line%"${line##*[![:space:]]}"}"	# Trim trailing whitespace
+        [[ -z "$line" ]] && continue
+
+        ZONES+=("$line")
+        _debug "Added zone from file: $line"
+    done < "$FILE"
+
+    if [[ ${#ZONES[@]} -eq 0 ]]; then
+        _error "No valid zones found in file: $FILE"
+        return 1
+    fi
+
+    _debug "Parsed ${#ZONES[@]} zones from file"
+    printf '%s\n' "${ZONES[@]}"
+}
+
+# =====================================
+# -- _init_multi_zone_log
+# -- Initialize log file for multi-zone operations
+# =====================================
+cf_api_functions["_init_multi_zone_log"]="Initialize multi-zone log"
+function _init_multi_zone_log() {
+    local TIMESTAMP
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    MULTI_ZONE_LOG="${TMPDIR:-/tmp}/cf-multi-${TIMESTAMP}.log"
+    
+    echo "# Cloudflare CLI Multi-Zone Operation Log" > "$MULTI_ZONE_LOG"
+    echo "# Started: $(date)" >> "$MULTI_ZONE_LOG"
+    echo "# Total zones: ${#ZONES_TO_PROCESS[@]}" >> "$MULTI_ZONE_LOG"
+    echo "# ========================================" >> "$MULTI_ZONE_LOG"
+    
+    _debug "Multi-zone log initialized: $MULTI_ZONE_LOG"
+}
+
+# =====================================
+# -- _log_zone_action $ZONE $ACTION $STATUS $MESSAGE
+# -- Log action for a specific zone
+# =====================================
+cf_api_functions["_log_zone_action"]="Log zone action"
+function _log_zone_action() {
+    local ZONE="$1"
+    local ACTION="$2"
+    local STATUS="$3"
+    local MESSAGE="$4"
+    local TIMESTAMP
+    TIMESTAMP=$(date +%H:%M:%S)
+
+    echo "[$TIMESTAMP] [$STATUS] $ZONE | $ACTION | $MESSAGE" >> "$MULTI_ZONE_LOG"
+}
+
+# =====================================
+# -- _multi_zone_summary
+# -- Generate and print summary report
+# =====================================
+cf_api_functions["_multi_zone_summary"]="Print multi-zone summary"
+function _multi_zone_summary() {
+    local TOTAL=${#ZONES_TO_PROCESS[@]}
+    local SUCCESS=${#ZONES_SUCCESS[@]}
+    local FAILED=${#ZONES_FAILED[@]}
+    local SKIPPED=$((TOTAL - SUCCESS - FAILED))
+
+    echo "" >> "$MULTI_ZONE_LOG"
+    echo "# ========================================" >> "$MULTI_ZONE_LOG"
+    echo "# Summary" >> "$MULTI_ZONE_LOG"
+    echo "# Completed: $(date)" >> "$MULTI_ZONE_LOG"
+    echo "# Total: $TOTAL | Success: $SUCCESS | Failed: $FAILED | Skipped: $SKIPPED" >> "$MULTI_ZONE_LOG"
+
+    echo ""
+    echo "========================================"
+    _running "Multi-Zone Operation Summary"
+    echo "========================================"
+    echo "  Total zones:    $TOTAL"
+    _success "Succeeded:      $SUCCESS"
+    [[ $FAILED -gt 0 ]] && _error "Failed:         $FAILED"
+    [[ $SKIPPED -gt 0 ]] && _warning "Skipped:        $SKIPPED"
+    echo ""
+    
+    if [[ $FAILED -gt 0 ]]; then
+        _error "Failed zones:"
+        for zone in "${ZONES_FAILED[@]}"; do
+            echo "    - $zone"
+        done
+        echo ""
+    fi
+
+    _running2 "Log file: $MULTI_ZONE_LOG"
+}
+
+# =====================================
+# -- _confirm_multi_zone
+# -- Prompt user to confirm multi-zone operation
+# =====================================
+cf_api_functions["_confirm_multi_zone"]="Confirm multi-zone operation"
+function _confirm_multi_zone() {
+    local COUNT=${#ZONES_TO_PROCESS[@]}
+    
+    echo ""
+    _warning "You are about to process $COUNT zone(s):"
+    printf '    %s\n' "${ZONES_TO_PROCESS[@]}"
+    echo ""
+    read -r -p "Proceed with operation? [y/N] " CONFIRM
+    [[ "$CONFIRM" =~ ^[Yy]$ ]] && return 0
+    return 1
+}
+
+# =====================================
+# -- _process_multi_zone $ACTION_FUNCTION [ARGS...]
+# -- Wrapper to iterate over zones with delay and logging
+# =====================================
+cf_api_functions["_process_multi_zone"]="Process multiple zones"
+function _process_multi_zone() {
+    local ACTION_FUNC="$1"
+    shift
+    local ACTION_ARGS=("$@")
+    local TOTAL=${#ZONES_TO_PROCESS[@]}
+    local CURRENT=0
+
+    # Initialize logging
+    _init_multi_zone_log
+
+    # Confirm before proceeding
+    if ! _confirm_multi_zone; then
+        _running2 "Operation cancelled by user."
+        return 1
+    fi
+
+    for ZONE in "${ZONES_TO_PROCESS[@]}"; do
+        ((CURRENT++))
+        _running "Processing zone $CURRENT of $TOTAL: $ZONE"
+        
+        # Execute the action function with the zone
+        if "$ACTION_FUNC" "$ZONE" "${ACTION_ARGS[@]}"; then
+            ZONES_SUCCESS+=("$ZONE")
+            _log_zone_action "$ZONE" "$ACTION_FUNC" "SUCCESS" "Completed"
+            _success "Zone $ZONE processed successfully"
+        else
+            ZONES_FAILED+=("$ZONE")
+            _log_zone_action "$ZONE" "$ACTION_FUNC" "FAILED" "Error occurred"
+            _error "Zone $ZONE failed"
+            
+            if [[ $MULTI_ZONE_CONTINUE_ON_ERROR -ne 1 ]]; then
+                _error "Stopping due to error. Use --continue-on-error to proceed despite failures."
+                _multi_zone_summary
+                return 1
+            fi
+        fi
+
+        # Delay between zones (except for last one)
+        if [[ $CURRENT -lt $TOTAL ]]; then
+            _running2 "Waiting ${MULTI_ZONE_DELAY}s before next zone..."
+            sleep "$MULTI_ZONE_DELAY"
+        fi
+    done
+
+    _multi_zone_summary
+    [[ ${#ZONES_FAILED[@]} -gt 0 ]] && return 1
+    return 0
+}

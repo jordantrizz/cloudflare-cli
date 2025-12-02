@@ -5,6 +5,11 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
 API_PROFILE=""
+# Multi-zone processing globals
+declare -a CLI_ZONES=()
+declare -a ZONES_TO_PROCESS=()
+ZONES_FILE=""
+MULTI_ZONE_CONTINUE_ON_ERROR=0
 # shellcheck source=./cf-inc.sh
 source "$SCRIPT_DIR/cf-inc.sh"
 # shellcheck source=./cf-inc-api.sh
@@ -39,6 +44,25 @@ do
 			;;
 		-d|--detail|--detailed|--details)
 			details=1;;
+		-z|--zone)
+			shift
+			if [ -z "$1" ]; then
+				_die "Usage: cloudflare -z <zone>"
+			fi
+			CLI_ZONES+=("$1")
+			_debug "Added zone from CLI: $1"
+			;;
+		-f|--zones-file)
+			shift
+			if [ -z "$1" ]; then
+				_die "Usage: cloudflare -f <zones-file>"
+			fi
+			ZONES_FILE="$1"
+			_debug "Zones file specified: $ZONES_FILE"
+			;;
+		--continue-on-error)
+			MULTI_ZONE_CONTINUE_ON_ERROR=1
+			;;
 		-q|--quiet)
 			# TODO needs  to be re-implemmented
 			QUIET=1;;
@@ -61,6 +85,17 @@ do
 	esac
 	shift
 done
+
+# -- Merge zones from CLI and file into ZONES_TO_PROCESS
+if [[ -n "$ZONES_FILE" ]]; then
+	while IFS= read -r zone; do
+		ZONES_TO_PROCESS+=("$zone")
+	done < <(_parse_zones_file "$ZONES_FILE")
+fi
+for zone in "${CLI_ZONES[@]}"; do
+	ZONES_TO_PROCESS+=("$zone")
+done
+[[ ${#ZONES_TO_PROCESS[@]} -gt 0 ]] && _debug "Total zones to process: ${#ZONES_TO_PROCESS[@]}"
 
 # -- If no command left after option parsing, just show usage and exit
 if [ -z "$1" ]; then

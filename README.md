@@ -11,11 +11,59 @@ Options:
  --quiet, -q      Less verbose
  -E <email>
  -T <api_token>
+ -p, --profile    Use credentials profile NAME from ~/.cloudflare
+
+Multi-Zone Options:
+ -z, --zone       Specify zone (can be repeated for multiple zones)
+ -f, --zones-file Read zones from file (one per line, # comments)
+ --continue-on-error  Continue processing despite individual zone failures
+
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
 Enter "cloudflare help" to list available commands.
 ```
+
+# Multi-Zone Operations
+
+You can apply commands to multiple zones at once using the `-z` and `-f` options.
+
+## Specify zones on command line
+```bash
+# Clear cache on multiple zones
+cloudflare -z example.com -z example.org clear cache
+
+# Show records for multiple zones  
+cloudflare -z site1.com -z site2.com show records
+```
+
+## Use a zones file
+Create a file with one zone per line (comments with `#` are supported):
+```
+# zones.txt
+example.com
+example.org
+# staging.example.com  (commented out)
+production.example.net
+```
+
+Then use it:
+```bash
+cloudflare -f zones.txt clear cache
+```
+
+## Combine both methods
+```bash
+cloudflare -z extra-zone.com -f zones.txt clear cache
+```
+
+## Continue on errors
+By default, processing stops on the first error. Use `--continue-on-error` to process all zones:
+```bash
+cloudflare -f zones.txt --continue-on-error clear cache
+```
+
+After processing, a summary report is displayed and a log file is created in `$TMPDIR`.
 
 # Config
 ## Config Global API
