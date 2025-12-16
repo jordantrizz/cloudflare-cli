@@ -831,6 +831,54 @@ function _cf_find_record_by_name () {
     echo "$SELECTED_RECORD_JSON" | jq -r '"\(.id)|\(.type)|\(.name)|\(.content)|\(.ttl)|\(.proxied)"'
 }
 
+# =====================================
+# -- _cf_get_record_by_name $RECORD_NAME
+# -- Get all DNS records for a given record name (all types)
+# =====================================
+cf_api_functions["_cf_get_record_by_name"]="Get DNS record details by name"
+function _cf_get_record_by_name () {
+    local RECORD_INPUT="$1"
+
+    [[ -z $RECORD_INPUT ]] && _error "Missing record name" && return 1
+
+    local RECORD_NAME
+    RECORD_NAME=$(_validate_record_name "$RECORD_INPUT") || return 1
+
+    _debug "Deriving zone for record: $RECORD_NAME"
+    local ZONE_DATA
+    ZONE_DATA=$(_cf_derive_zone_from_record "$RECORD_NAME") || { _error "Unable to find managed zone for $RECORD_NAME"; return 1; }
+    local ZONE ZONE_ID
+    IFS='|' read -r ZONE ZONE_ID <<< "$ZONE_DATA"
+
+    _debug "Found zone: $ZONE ($ZONE_ID) for record $RECORD_NAME"
+    cf_api GET /client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}
+    if [[ $CURL_EXIT_CODE != "200" ]]; then
+        _error "Failed to query DNS records for zone $ZONE_ID"
+        return 1
+    fi
+
+    local MATCH_COUNT
+    MATCH_COUNT=$(echo "$API_OUTPUT" | jq '.result | length')
+
+    if [[ $MATCH_COUNT -eq 0 ]]; then
+        _error "No records found for $RECORD_NAME"
+        return 1
+    fi
+
+    # Output header
+    printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "Type" "Name" "Content" "TTL" "Proxied" "Record ID"
+    printf "%s\n" "$(printf '%0.s-' {1..155})"
+
+    # Output each record
+    echo "$API_OUTPUT" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(.ttl)\t\(.proxied)\t\(.id)"' | while IFS=$'\t' read -r TYPE NAME CONTENT TTL PROXIED RID; do
+        # Display TTL as "auto" if it's 1
+        [[ "$TTL" == "1" ]] && TTL="auto"
+        printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "$TYPE" "$NAME" "${CONTENT:0:45}" "$TTL" "$PROXIED" "$RID"
+    done
+
+    return 0
+}
+
 # =============================================================================
 # -- Account Functions
 # =============================================================================
