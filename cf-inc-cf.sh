@@ -769,7 +769,14 @@ function call_cf_v4 () {
 			if [[ $DEBUG_CURL == "1" ]]; then
 				set -x
 			fi				
-            	CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: $CF_TOKEN\" -X \"$METHOD\""
+			if [[ -n $API_TOKEN ]]; then
+				CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"Authorization: Bearer ${API_TOKEN}\" -X \"$METHOD\""
+			elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
+				CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"X-Auth-Email: ${API_ACCOUNT}\" -H \"X-Auth-Key: ${API_APIKEY}\" -X \"$METHOD\""
+			else
+				_error "No authentication credentials found"
+				return 1
+			fi
 				# Grab each CURL_OPTS and add to CURL_CMD
 				for i in "${CURL_OPTS[@]}"; do
 					CURL_CMD+=" $i"
