@@ -122,9 +122,9 @@ Configuration file for credentials (~/.cloudflare):
 	CF_TOKEN=default-token
 
 	# Named profiles
-	CF_WORK_ACCOUNT=work@example.com
-	CF_WORK_KEY=work-global-key
-	CF_PROD_TOKEN=long-production-token
+	CF_ACCOUNT_WORK=work@example.com
+	CF_KEY_WORK=work-global-key
+	CF_TOKEN_PROD=long-production-token
 
 Examples:
 	cloudflare --profile work show zones

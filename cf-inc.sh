@@ -283,9 +283,9 @@ function _check_cloudflare_creds () {
             fi
         else
             # Check account/key pair for this profile
-            local account_var="CF_${PROFILE_UPPER}_ACCOUNT"
-            local key_var="CF_${PROFILE_UPPER}_KEY"
-            local token_var="CF_${PROFILE_UPPER}_TOKEN"
+            local account_var="CF_ACCOUNT_${PROFILE_UPPER}"
+            local key_var="CF_KEY_${PROFILE_UPPER}"
+            local token_var="CF_TOKEN_${PROFILE_UPPER}"
 
             # shellcheck disable=SC2154
             if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
@@ -490,9 +490,9 @@ function _cf_show_profile () {
         return 0
     fi
 
-    local account_var="CF_${PROFILE_UPPER}_ACCOUNT"
-    local key_var="CF_${PROFILE_UPPER}_KEY"
-    local token_var="CF_${PROFILE_UPPER}_TOKEN"
+    local account_var="CF_ACCOUNT_${PROFILE_UPPER}"
+    local key_var="CF_KEY_${PROFILE_UPPER}"
+    local token_var="CF_TOKEN_${PROFILE_UPPER}"
 
     if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
         echo "Profile: ${PROFILE_UPPER}"

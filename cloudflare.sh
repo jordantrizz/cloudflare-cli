@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =================================================================================================
-# cloudflare-cli v1.0.1
+# cloudflare-cli v1.4.4
 # =================================================================================================
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
@@ -172,8 +172,8 @@ show|list)
 		call_cf_v4 GET /zones/$ZONE_ID/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 
-	# -- record
-	record|records)
+	# -- records (all records for a zone)
+	records)
 		_pre_flight_check CF_
 		_running "Running: cloudflare $CMD1 records $*"
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
@@ -186,6 +186,14 @@ show|list)
 		#call_cf_v4 GET /zones/$ZONE_ID/dns_records -- .result %"%-20s %11s %-8s %s %s$TA; %s #%s$NL" \
 		#	',@zone_name@name,?<$ttl==1?"auto"?ttl,type,||priority||data.priority||"",content,!!proxiable proxied locked,id'
 		_cf_zone_records "$ZONE_ID"
+		;;
+
+	# -- record (individual record by name)
+	record)
+		_pre_flight_check CF_
+		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
+		_running "Getting record details for $1"
+		_cf_get_record_by_name "$1"
 		;;
 
 	# -- access-rules
@@ -897,7 +905,10 @@ search)
 		zone_search "$1"
 		;;
 	record)
-		echo "Not implemented"
+		_pre_flight_check CF_
+		[ -z "$1" ] && { help search; _die "Missing record name"; }
+		_running2 "Searching for record $1"
+		_cf_get_record_by_name "$1"
 		;;
 	*)
 		_die "Usage: cloudflare search [zone|record]"
