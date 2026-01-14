@@ -983,6 +983,13 @@ profile)
 	esac
 	;;
 
+# -----------------------------------------------
+# -- profiles command - list profiles with masked keys/tokens
+# -----------------------------------------------
+profiles)
+	_cf_profiles_list
+	;;
+
 # =====================================
 # -- proxy command
 # =====================================

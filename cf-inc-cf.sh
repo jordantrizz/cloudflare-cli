@@ -7,7 +7,7 @@
 # ===============================================
 # -- Variables
 # ===============================================
-VERSION=1.1.2-alpha
+VERSION="$(cat "$SCRIPT_DIR"/VERSION 2>/dev/null || echo "unknown")"
 DEBUG=0
 DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 # Clear debug log
@@ -29,18 +29,18 @@ HELP_VERSION="Version: $VERSION"
 # -----------------------------------------------
 HELP_OPTIONS="Options:
 ---------
-	--details, -d       Display detailed info where possible
-	--debug, -D         Display API debugging info
-	--debug-curl, -DC   Display API debugging info and curl output
-	--quiet, -q         Less verbose
-	-E <email>          Cloudflare Email
-	-T <api_token>      Cloudflare API Token
-	-p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
+    --details, -d       Display detailed info where possible
+    --debug, -D         Display API debugging info
+    --debug-curl, -DC   Display API debugging info and curl output
+    --quiet, -q         Less verbose
+    -E <email>          Cloudflare Email
+    -T <api_token>      Cloudflare API Token
+    -p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
 
 Multi-Zone Options:
-	-z, --zone <zone>   Specify zone (can be repeated for multiple zones)
-	-f, --zones-file    Read zones from file (one per line, # comments)
-	--continue-on-error Continue processing despite individual zone failures"
+    -z, --zone <zone>   Specify zone (can be repeated for multiple zones)
+    -f, --zones-file    Read zones from file (one per line, # comments)
+    --continue-on-error Continue processing despite individual zone failures"
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -49,6 +49,10 @@ HELP_FULL="Usage: cloudflare [Options] <command> <parameters>
 
 Main Commands:
 ---------
+    account    - Show account information
+                list
+                details <account_id>
+                zones <account_id>
     list        - Show information about an object
                     zone <zone>
                     zones
@@ -76,7 +80,7 @@ Main Commands:
                     list
                     apply <zone> <template>
 
-	search	    - Search for object
+    search	    - Search for object
                     zone <query> (Return one zone)
                     zones <query> (Return all zones that match)
                     record <query>
@@ -85,17 +89,14 @@ Main Commands:
                     cache <zone>
                     invalidate <url>
 
-	invalidate  - Invalidate cache
+    invalidate  - Invalidate cache
                     <url> url to invalidate
 
 Additional Commands:
 --------------------
-    account    - Show account information
-				list
-				details	<account_id>
-				zones <account_id>
-	
-	check       - Activate check
+    profiles   - List profiles
+
+    check       - Activate check
                     zone <zone>
 
     json        - Test json_decode function
@@ -107,31 +108,30 @@ Additional Commands:
 
     help        - Full help
 
-	examples - Show Examples
+    examples - Show Examples
 
 Environment variables:
-	CF_ACCOUNT       - email address (as -E option)
-	CF_KEY           - global API key for account auth
-	CF_TOKEN         - API token (as -T option)
-	CF_PROFILE       - default profile name (same as --profile)
+    CF_ACCOUNT       - email address (as -E option)
+    CF_KEY           - global API key for account auth
+    CF_TOKEN         - API token (as -T option)
+    CF_PROFILE       - default profile name (same as --profile)
 
 Configuration file for credentials (~/.cloudflare):
-	# Default credentials
-	CF_ACCOUNT=example@example.com
-	CF_KEY=global-api-key
-	CF_TOKEN=default-token
+    # Default credentials
+    CF_ACCOUNT=example@example.com
+    CF_KEY=global-api-key
+    CF_TOKEN=default-token
 
-	# Named profiles
-	CF_ACCOUNT_WORK=work@example.com
-	CF_KEY_WORK=work-global-key
-	CF_TOKEN_PROD=long-production-token
+    # Named profiles
+    CF_ACCOUNT_WORK=work@example.com
+    CF_KEY_WORK=work-global-key
+    CF_TOKEN_PROD=long-production-token
 
 Examples:
-	cloudflare --profile work show zones
-	cloudflare --profile prod add record example.com A www 203.0.113.10
+    cloudflare --profile work show zones
+    cloudflare --profile prod add record example.com A www 203.0.113.10
 
 ${HELP_EXAMPLES}
-
 ${HELP_VERSION}
 
 Enter \"cloudflare help\" to list available commands."
@@ -141,19 +141,19 @@ Enter \"cloudflare help\" to list available commands."
 # -----------------------------------------------
 HELP_CMDS="Commands:
 ----------
+    account     list,details,zones
     list        zone, zones, settings, records, listing
     add         zone, record, whitelist, blacklist, challenge
     delete      zone, record, listing
     change      zone, record
     clear       cache
-    invalidate  url	
+    invalidate  url
     template    list, apply
     search      zone, record
 
 Additional Commands:
 --------------------
-    account     list,details,zones 	- Show account information
-    check       - Activate check	
+    check       - Activate check
     json        - Test json_decode function
     ishex       - Check if string is hex
     pass        - Pass through queries to CF API
@@ -226,7 +226,7 @@ Usage: cloudflare show [zones|zone <zone>|settings <zone>|records <zone>|access-
         settings         -List settings for <zone>
         records          -List records for <zone>
         access-lists     -List access lists for <zone>
-		email-routing    -List email routing for <zone>
+        email-routing    -List email routing for <zone>
 
     Options:
         <zone> domain zone to register the record in, see 'show zones' command
@@ -249,13 +249,13 @@ Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxie
 Options
     [ttl]       Time To Live, 1 = auto
     
-	= MX records:
+    = MX records:
     [prio]      required only by MX and SRV records, enter \"10\" if unsure
     
-	= A or CNAME records:
+    = A or CNAME records:
     [proxied]   Proxied, true or false. For A or CNAME records only.
     
-	= SRV records:
+    = SRV records:
     [service]   service name, eg. \"sip\"
     [protocol]  tcp, udp, tls
     [weight]    relative weight for records with the same priority
@@ -269,15 +269,15 @@ ${HELP_VERSION}
 # -----------------------------------------------
 HELP_CLEAR="${HELP_CMDS_SHORT}
 
-Usage: cloudflare clear cache <zone>	   
+Usage: cloudflare clear cache <zone>
 
-	Commands:
-	---------
-		cache            -Clear cache for <zone>		
+    Commands:
+    ---------
+        cache            -Clear cache for <zone>
 
-	Options:
-	--------
-		<zone> domain zone to clear cache for, see 'show zones' command		
+    Options:
+    --------
+        <zone> domain zone to clear cache for, see 'show zones' command
 
 ${HELP_VERSION}
 "

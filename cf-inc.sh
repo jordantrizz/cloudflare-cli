@@ -343,14 +343,14 @@ function _check_cloudflare_creds () {
         _debug "Found default token: CF_TOKEN=$(_mask_sensitive "${CF_TOKEN}")"
     fi
     
-    # Find all profile-based configurations
+    # Find all profile-based configurations with new naming convention CF_*_<NAME>
     local profiles
-    profiles=$(grep -E "^CF_[A-Z0-9_]+_(ACCOUNT|TOKEN|KEY)=" "$CONFIG" | sed -E 's/^CF_([A-Z0-9_]+)_(ACCOUNT|TOKEN|KEY)=.*/\1/' | sort -u)
+    profiles=$(grep -E "^CF_(ACCOUNT|TOKEN|KEY)_[A-Z0-9_]+=" "$CONFIG" | sed -E 's/^CF_(ACCOUNT|TOKEN|KEY)_([A-Z0-9_]+)=.*/\2/' | sort -u)
 
     for profile in $profiles; do
-        local account_var="CF_${profile}_ACCOUNT"
-        local key_var="CF_${profile}_KEY"
-        local token_var="CF_${profile}_TOKEN"
+        local account_var="CF_ACCOUNT_${profile}"
+        local key_var="CF_KEY_${profile}"
+        local token_var="CF_TOKEN_${profile}"
         
         # Check for profile account/key combination
         if [[ -n ${!account_var:-} ]]; then
@@ -440,11 +440,11 @@ function _cf_list_profiles () {
     fi
 
     local profiles
-    profiles=$(grep -E "^CF_[A-Z0-9_]+_(ACCOUNT|TOKEN|KEY)=" "$CONFIG" | sed -E 's/^CF_([A-Z0-9_]+)_(ACCOUNT|TOKEN|KEY)=.*/\1/' | sort -u)
+    profiles=$(grep -E "^CF_(ACCOUNT|TOKEN|KEY)_[A-Z0-9_]+=" "$CONFIG" | sed -E 's/^CF_(ACCOUNT|TOKEN|KEY)_([A-Z0-9_]+)=.*/\2/' | sort -u)
     for profile in $profiles; do
-        local account_var="CF_${profile}_ACCOUNT"
-        local key_var="CF_${profile}_KEY"
-        local token_var="CF_${profile}_TOKEN"
+        local account_var="CF_ACCOUNT_${profile}"
+        local key_var="CF_KEY_${profile}"
+        local token_var="CF_TOKEN_${profile}"
 
         if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
             printf "%-20s %-10s %s\n" "$profile" "account" "${!account_var}"
@@ -509,6 +509,49 @@ function _cf_show_profile () {
 
     _error "Profile ${NAME} not found or incomplete in ${CONFIG}"
     return 1
+}
+
+# =====================================
+# -- _cf_profiles_list
+# -- List all profiles with masked keys/tokens and visible accounts
+# =====================================
+function _cf_profiles_list () {
+    local CONFIG="$HOME/.cloudflare"
+    if [[ ! -f "$CONFIG" ]]; then
+        _error "No .cloudflare file found at $CONFIG"
+        return 1
+    fi
+
+    # shellcheck source=/dev/null
+    source "$CONFIG"
+
+    printf "%s\n" "Available Cloudflare profiles:"
+    printf "%-20s %-10s %s\n" "Profile" "Type" "Details"
+    printf "%-20s %-10s %s\n" "------" "----" "-------"
+
+    # Default account/key
+    if [[ -n ${CF_ACCOUNT:-} && -n ${CF_KEY:-} ]]; then
+        printf "%-20s %-10s %s\n" "DEFAULT" "account" "Email: ${CF_ACCOUNT}, Key: ********${CF_KEY: -4}"
+    fi
+    # Default token
+    if [[ -n ${CF_TOKEN:-} ]]; then
+        printf "%-20s %-10s %s\n" "DEFAULT" "token" "Token: ********${CF_TOKEN: -4}"
+    fi
+
+    # Find all profiles with new naming convention CF_*_<NAME>
+    local profiles
+    profiles=$(grep -E "^CF_(ACCOUNT|TOKEN|KEY)_[A-Z0-9_]+=" "$CONFIG" | sed -E 's/^CF_(ACCOUNT|TOKEN|KEY)_([A-Z0-9_]+)=.*/\2/' | sort -u)
+    for profile in $profiles; do
+        local account_var="CF_ACCOUNT_${profile}"
+        local key_var="CF_KEY_${profile}"
+        local token_var="CF_TOKEN_${profile}"
+
+        if [[ -n ${!account_var:-} && -n ${!key_var:-} ]]; then
+            printf "%-20s %-10s %s\n" "$profile" "account" "Email: ${!account_var}, Key: ********${!key_var: -4}"
+        elif [[ -n ${!token_var:-} ]]; then
+            printf "%-20s %-10s %s\n" "$profile" "token" "Token: ********${!token_var: -4}"
+        fi
+    done
 }
 
 # =====================================
