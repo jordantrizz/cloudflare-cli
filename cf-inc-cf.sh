@@ -781,11 +781,11 @@ function call_cf_v4 () {
 				for i in "${CURL_OPTS[@]}"; do
 					CURL_CMD+=" $i"
 				done
-				_debug "CURL_CMD: $CURL_CMD"
-
-			if [[ $DEBUG_CURL == "1" ]]; then
-				set +x
-			fi
+			# Create masked version for debugging (hide sensitive keys)
+			CURL_CMD_MASKED="$CURL_CMD"
+			CURL_CMD_MASKED="${CURL_CMD_MASKED//${API_APIKEY}/[MASKED]}"
+			CURL_CMD_MASKED="${CURL_CMD_MASKED//${API_TOKEN}/[MASKED]}"
+			_debug "CURL_CMD: $CURL_CMD_MASKED"
 			CURL_OUTPUT=$(eval $CURL_CMD)		
 			CURL_EXIT_CODE=$?
 			_debug "CURL_OUTPUT: $CURL_OUTPUT" 2
@@ -806,6 +806,8 @@ function call_cf_v4 () {
 			fi
 
 			_debug "json-filter: ${*}"
+			# TODO: Replace json_decode with jq for better reliability and performance
+			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
 			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
             _debug "\$@ == $@"
@@ -923,36 +925,61 @@ findout_record() {
 # ===============================================
 function zone_search () {
 	_debug "function:${FUNCNAME[0]} - ${*}"
-	local QUERY="$1" SEARCH_ZONE_OUTPUT SUCCESS="0" ZONES_FOUND=""
+	local QUERY="$1" SUCCESS="0" ZONES_FOUND="" ZONE_IDS_FOUND=""
 
-	# Get a list of all domains and put it into an array.
-	# Get a list of 100 damains at a time. Then wait 5 seconds
-	# Then loop through the array and check if the domain is in the list.
-	# If it is, then get the zone id and break the loop.
-	# If it is not, then get the next 100 domains and repeat the process.
-	# If the domain is not found, then return an error.
-
-	# Start first loop
-	OVERRIDE_RESULTS_PER_PAGE=100
-	OVERRIDE_RESULT_PAGE=1
-	_debug "PER_PAGE: $OVERRIDE_RESULT_PAGE PAGE: $OVERRIDE_RESULTS_PER_PAGE"
-	_debug "SEARCH_ZONE_OUTPUT: $SEARCH_ZONE_OUTPUT"
-	SEARCH_ZONE_OUTPUT=$(call_cf_v4 GET /zones -- .result %"%s$NL" ,name)
-
-	# A list of all zones on a new line are in $SEARCH_ZONE_OUTPUT
-	# Loop through the list of zones and return anything containing $QUERY
-	# If found, then return the zone name
-	# If not found, then return an error
-	for zone in $SEARCH_ZONE_OUTPUT; do
-		if [[ $zone == *"$QUERY"* ]]; then
+	# Get a list of all zones using jq for parsing
+	_debug "Calling API: GET /zones"
+	
+	# Build curl command to get zones - bypass json_decode
+	local QUERY_STRING="?page=1&per_page=100"
+	local CURL_OUTPUT
+	
+	if [[ -n $API_TOKEN ]]; then
+		CURL_OUTPUT=$(curl -sS "${APIv4_ENDPOINT}/zones${QUERY_STRING}" -H "Authorization: Bearer ${API_TOKEN}" -X GET)
+	elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
+		CURL_OUTPUT=$(curl -sS "${APIv4_ENDPOINT}/zones${QUERY_STRING}" -H "X-Auth-Email: ${API_ACCOUNT}" -H "X-Auth-Key: ${API_APIKEY}" -X GET)
+	else
+		_error "No authentication credentials found"
+		return 1
+	fi
+	
+	_debug "Raw JSON received, length: ${#CURL_OUTPUT}"
+	
+	# Use jq to extract zone id and name as TSV (tab-separated values)
+	# This outputs: id<TAB>name for each zone
+	local JQ_OUTPUT
+	JQ_OUTPUT=$(echo "$CURL_OUTPUT" | jq -r '.result[] | "\(.id)\t\(.name)"' 2>/dev/null)
+	_debug "JQ output received, length: ${#JQ_OUTPUT}"
+	
+	# Count zones from API
+	local zone_count=0
+	zone_count=$(echo "$JQ_OUTPUT" | grep -c . 2>/dev/null || echo 0)
+	_debug "Total zones returned from API: $zone_count"
+	
+	# Parse TSV output and search for matching zones
+	_debug "Searching for zones containing: $QUERY"
+	
+	while IFS=$'\t' read -r zone_id zone_name; do
+		[[ -z "$zone_id" ]] && continue
+		_debug "Processing - zone_id: '$zone_id', zone_name: '$zone_name'"
+		if [[ -n "$zone_name" ]] && [[ $zone_name == *"$QUERY"* ]]; then
+			_debug "  Match found!"
 			SUCCESS="1"
-			ZONES_FOUND+="$zone\n"			
+			ZONES_FOUND+="$zone_name\n"
+			ZONE_IDS_FOUND+="$zone_id\n"			
 		fi
-	done
+	done <<< "$JQ_OUTPUT"
 
+	_debug "Final SUCCESS: $SUCCESS"
+	local found_count=0
+	found_count=$(echo -e "$ZONES_FOUND" | grep -c . 2>/dev/null || echo 0)
+	_debug "Zones found count: $found_count"
+	
 	if [[ $SUCCESS == "1" ]]; then
 		_success "Found the following zones:"
-		echo -e "$ZONES_FOUND"		
+		printf "%-40s | %-40s\n" "DomainID" "Domain"
+		printf "%s-+-%s\n" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..40})"
+		paste <(echo -e "$ZONE_IDS_FOUND") <(echo -e "$ZONES_FOUND") | column -t -s $'\t' | awk '{printf "%-40s | %-40s\n", $1, $2}'
 	else
 		_error "Zone not found - $QUERY"
 	fi

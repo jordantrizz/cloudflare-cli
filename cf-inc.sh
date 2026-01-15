@@ -559,8 +559,19 @@ function _cf_profiles_list () {
 # =====================================
 function _set_credentials_from_profile() {
     local profile="$1"
+    local CONFIG="$HOME/.cloudflare"
     
     _debug "Setting credentials from profile: $profile"
+    
+    # Re-source the config file to ensure variables are available
+    # shellcheck source=/dev/null
+    source "$CONFIG"
+    
+    # Debug: show what token variables exist
+    _debug "Available CF_*_TOKEN variables in config:"
+    grep "^CF_.*_TOKEN=" "$CONFIG" | sed 's/=.*//' | while read -r var; do
+        _debug "  Found in file: $var"
+    done
     
     case "$profile" in
         "DEFAULT_ACCOUNT")
@@ -578,8 +589,8 @@ function _set_credentials_from_profile() {
             ;;
         *"_ACCOUNT")
             local profile_name="${profile%_ACCOUNT}"
-            local account_var="CF_${profile_name}_ACCOUNT"
-            local key_var="CF_${profile_name}_KEY"
+            local account_var="CF_ACCOUNT_${profile_name}"
+            local key_var="CF_KEY_${profile_name}"
             API_ACCOUNT="${!account_var}"
             API_APIKEY="${!key_var}"
             API_METHOD="account"
@@ -588,7 +599,9 @@ function _set_credentials_from_profile() {
             ;;
         *"_TOKEN")
             local profile_name="${profile%_TOKEN}"
-            local token_var="CF_${profile_name}_TOKEN"
+            local token_var="CF_TOKEN_${profile_name}"
+            _debug "Token profile: profile_name=${profile_name}, token_var=${token_var}"
+            _debug "Token variable exists: [${!token_var}]"
             API_TOKEN="${!token_var}"
             API_METHOD="token"
             _debug "Set credentials: profile=${profile_name}, API_TOKEN=$(_mask_sensitive "${API_TOKEN}"), API_METHOD=${API_METHOD}"

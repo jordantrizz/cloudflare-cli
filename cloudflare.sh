@@ -1071,6 +1071,8 @@ check)
 # ---------------
 # -- json command
 # ---------------
+# TODO: Replace json_decode with jq for better reliability and performance
+# This command uses the deprecated json_decode function. Consider rewriting to use jq instead.
 json)	
 	_running "Reading STDIN data and sending to json_decode with args: ${@}"
 	JSON_FILE="$1"
