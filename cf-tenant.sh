@@ -35,7 +35,7 @@ function _cf_partner_help () {
     echo
     echo "Commands: -c, --command"
     echo
-    _running "Account Commands:"
+    _loading "Account Commands:"
     echo "  create <name>                                - Create a new tenant"
     echo "  create-bulk <file>                           - Create tenants in bulk"
     echo "  create-access <tenant-id> <account_id>       - Create a new tenant with access"
@@ -43,7 +43,7 @@ function _cf_partner_help () {
     echo "  get <id>                                     - Get tenant details"
     echo "  delete <id>,<id>                             - Delete tenant, or multiple separated by ,"
     echo
-    _running "Zone Commands:"
+    _loading "Zone Commands:"
     echo "  create-zone <tenant-id> <domain> <scan>      - Create a new zone for tenant"
     echo "  create-zone-bulk <file>                      - Create zones in bulk"
     echo "  scan-zone <zone-id>                          - Scan zone DNS records"
@@ -53,7 +53,7 @@ function _cf_partner_help () {
     echo "  count-zone-records <zone-id>                 - Count zone records"
     echo "  count-zone-records-bulk <file>               - Count zone records in bulk"
     echo
-    _running "Access Commands:"
+    _loading "Access Commands:"
     echo "  add-access <tenant-id> <email> <role>        - Create a new access for tenant"
     echo "  get-access <tenant-id> <account_id>          - Get access for tenant"
     echo "  delete-access <tenant-id> <member-id>        - Get all roles"
@@ -127,7 +127,7 @@ if [[ $CMD == "create" ]]; then
     _debug "Command: create"
     NAME=$1
     [[ -z $NAME ]] && { _error "Missing tenant name"; exit 1; }
-    _running "Creating tenant $NAME"
+    _loading "Creating tenant $NAME"
     _cf_tenant_create $NAME
 # -- Command: create-bulk
 # ==================================
@@ -135,7 +135,7 @@ elif [[ $CMD == "create-bulk" ]]; then
     _debug "Command: create-bulk"
     FILE=$1
     [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
-    _running "Creating tenants from file $FILE"
+    _loading "Creating tenants from file $FILE"
     _cf_tenant_create_bulk $FILE
 # -- Command: create-access
 # ==================================
@@ -145,7 +145,7 @@ elif [[ $CMD == "create-access" ]]; then
     ACCOUNT_ID=$2
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
     [[ -z $ACCOUNT_ID ]] && { _error "Missing account ID"; exit 1; }
-    _running "Creating access for tenant $TENANT_ID"
+    _loading "Creating access for tenant $TENANT_ID"
     _cf_tenant_create_access $TENANT_ID $ACCOUNT_ID
 # -- Command: list
 # ==================================
@@ -154,7 +154,7 @@ elif [[ $CMD == "list" ]]; then
     ACCOUNT_ID=$(_get_account_id_from_creds)
     [[ $? -ne 0 ]] && { _error "Failed to get account id"; exit 1; }
     _debug "Account ID: $ACCOUNT_ID"
-    _running "Fetching tenants for account $ACCOUNT_ID"
+    _loading "Fetching tenants for account $ACCOUNT_ID"
     _cf_tenant_list_all
 # -- Command: get
 # ==================================
@@ -162,7 +162,7 @@ elif [[ $CMD == "get" ]]; then
     _debug "Command: get"
     TENANT_ID=$1
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
-    _running "Fetching tenant $TENANT_ID"    
+    _loading "Fetching tenant $TENANT_ID"    
     _cf_tenant_get $TENANT_ID
 # -- Command: delete
 # ==================================
@@ -171,9 +171,9 @@ elif [[ $CMD == "delete" ]]; then
     TENANT_ID=$@
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
 
-    _running "Deleting tenant"
+    _loading "Deleting tenant"
     # -- Confirm
-    _running2 "Are you sure you want to delete tenant(s)?\n"
+    _loading2 "Are you sure you want to delete tenant(s)?\n"
     echo -e "$TENANT_ID\n"
     read -p "Continue (y/n)? " choice
     case "$choice" in
@@ -185,10 +185,10 @@ elif [[ $CMD == "delete" ]]; then
     
     # -- Check if multiple tenant IDs separated by ,
     if [[ $TENANT_ID == *","* ]]; then
-        _running "Deleting multiple tenants"
+        _loading "Deleting multiple tenants"
         _cf_tenant_delete_bulk $TENANT_ID
     else
-        _running "Deleting tenant $TENANT_ID"
+        _loading "Deleting tenant $TENANT_ID"
         _cf_tenant_delete $TENANT_ID
     fi    
 # -- Command: create-zone
@@ -208,7 +208,7 @@ elif [[ $CMD == "create-zone" ]]; then
         exit 1
     fi
 
-    _running "Creating zone $DOMAIN for tenant $TENANT_ID"
+    _loading "Creating zone $DOMAIN for tenant $TENANT_ID"
     _cf_zone_create $TENANT_ID $DOMAIN $SCAN
 # -- Command: create-zone-bulk
 # ==============================
@@ -216,7 +216,7 @@ elif [[ $CMD == "create-zone-bulk" ]]; then
     _debug "Command: create-zone-bulk"
     FILE=$1
     [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
-    _running "Creating zones from file $FILE"
+    _loading "Creating zones from file $FILE"
     _cf_zone_create_bulk $FILE
 # -- Command: scan-zone
 # ==================================
@@ -224,7 +224,7 @@ elif [[ $CMD == "scan-zone" ]]; then
     _debug "Command: scan-zone"
     ZONE_ID=$1
     [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
-    _running "Scanning zone $ZONE_ID"
+    _loading "Scanning zone $ZONE_ID"
     _cf_zone_scan $ZONE_ID
 # -- Command: list-zones
 # ==================================
@@ -232,7 +232,7 @@ elif [[ $CMD == "list-zones" ]]; then
     _debug "Command: list-zones"
     ACCOUNT_ID=$1
     [[ -z $ACCOUNT_ID ]] && { _error "Missing tenant ID"; exit 1; }
-    _running "Fetching zones for tenant $ACCOUNT_ID"
+    _loading "Fetching zones for tenant $ACCOUNT_ID"
     _cf_zone_list $ACCOUNT_ID
 # -- Command: get-zone
 # ==================================
@@ -241,7 +241,7 @@ elif [[ $CMD == "get-zone" ]]; then
     ZONE_ID=$1
     PRINT=$2
     [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
-    _running "Fetching zone $ZONE_ID"
+    _loading "Fetching zone $ZONE_ID"
     _cf_zone_get $ZONE_ID $PRINT
 # -- Command: delete-zone
 # ==================================
@@ -249,7 +249,7 @@ elif [[ $CMD == "delete-zone" ]]; then
     _debug "Command: delete-zone"    
     ZONE_ID=$1
     [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
-    _running "Deleting zone $ZONE_ID"
+    _loading "Deleting zone $ZONE_ID"
     _cf_zone_delete $ZONE_ID
 # -- Command: count-zone-records
 # ==================================
@@ -257,7 +257,7 @@ elif [[ $CMD == "count-zone-records" ]]; then
     _debug "Command: count-zone-records"
     ZONE_ID=$1
     [[ -z $ZONE_ID ]] && { _error "Missing zone ID"; exit 1; }
-    _running "Counting zone records for zone $ZONE_ID"
+    _loading "Counting zone records for zone $ZONE_ID"
     _cf_zone_count_records $ZONE_ID
 # -- Command: count-zone-records-bulk
 # ==================================
@@ -265,7 +265,7 @@ elif [[ $CMD == "count-zone-records-bulk" ]]; then
     _debug "Command: count-zone-records-bulk"
     FILE=$1
     [[ -z $FILE ]] && { _error "Missing file"; exit 1; }
-    _running "Counting zone records from file $FILE"
+    _loading "Counting zone records from file $FILE"
     _cf_zone_count_records_bulk $FILE
 # -- Command: add-access
 # ==================================
@@ -277,7 +277,7 @@ elif [[ $CMD == "add-access" ]]; then
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
     [[ -z $EMAIL ]] && { _error "Missing email"; exit 1; }
     [[ -z $ROLE ]] && { _error "Missing role"; exit 1; }
-    _running "Creating access for tenant $TENANT_ID with account $EMAIL and role $ROLE"
+    _loading "Creating access for tenant $TENANT_ID with account $EMAIL and role $ROLE"
     _cf_tenant_access_add $TENANT_ID $EMAIL $ROLE
 # -- Command: get-access
 # ==================================
@@ -285,7 +285,7 @@ elif [[ $CMD == "get-access" ]]; then
     _debug "Command: get-access"
     TENANT_ID=$1
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
-    _running "Fetching access for tenant $TENANT_ID"
+    _loading "Fetching access for tenant $TENANT_ID"
     _cf_tenant_access_get $TENANT_ID
 # -- Command: delete-access
 # ==================================
@@ -295,7 +295,7 @@ elif [[ $CMD == "delete-access" ]]; then
     MEMBER_EMAIL=$2
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }
     [[ -z $MEMBER_EMAIL ]] && { _error "Missing member ID"; exit 1; }
-    _running "Deleting access for tenant $TENANT_ID with member $MEMBER_EMAIL"
+    _loading "Deleting access for tenant $TENANT_ID with member $MEMBER_EMAIL"
 
     # -- Get Member ID from email
     MEMBER_ID=$(_cf_get_member_id_from_email $TENANT_ID $MEMBER_EMAIL)
@@ -306,7 +306,7 @@ elif [[ $CMD == "delete-access" ]]; then
     echo "Are you sure you want to delete access for tenant $TENANT_ID with member $MEMBER_EMAIL / $MEMBER_ID?"
     read -p "Continue (y/n)? " choice
     case "$choice" in
-    y|Y ) _running "Deleting access for tenant $TENANT_ID with member $MEMBER_ID";;
+    y|Y ) _loading "Deleting access for tenant $TENANT_ID with member $MEMBER_ID";;
     n|N ) _error "Aborted"; exit 1;;
     * ) _error "Invalid"; exit 1;;
     esac    
@@ -318,7 +318,7 @@ elif [[ $CMD == "get-roles" ]]; then
     _debug "Command: get-roles"
     TENANT_ID=$1
     [[ -z $TENANT_ID ]] && { _error "Missing tenant ID"; exit 1; }    
-    _running "Fetching roles for account $TENANT_ID"
+    _loading "Fetching roles for account $TENANT_ID"
     _cf_tenant_roles_get $TENANT_ID
 else
     _cf_partner_help

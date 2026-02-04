@@ -22,7 +22,7 @@ echo "Cloudflare API Library v${API_LIB_VERSION}"
 # =====================================
 cf_api_functions["_list_core_functions"]="List all core functions"
 function _list_core_functions () {
-    _running "Listing all core functions with descriptions"
+    _loading "Listing all core functions with descriptions"
 
     # Print header
     printf "%-40s | %-40s | %s\n" "Function" "Description" "Count"
@@ -205,13 +205,13 @@ cf_api_functions["test_creds"]="Test credentials"
 function test_creds () {
     if [[ -n $API_TOKEN ]]; then
         _debug "function:${FUNCNAME[0]}"
-        _running "Testing credentials via CLI"
+        _loading "Testing credentials via CLI"
         cf_api GET /client/v4/user/tokens/verify
         API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
         [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
     elif [[ -n $API_APIKEY ]]; then
         _debug "function:${FUNCNAME[0]}"
-        _running "Testing credentials via CLI"
+        _loading "Testing credentials via CLI"
         cf_api GET /client/v4/user
         API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
         [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
@@ -227,7 +227,7 @@ function test_creds () {
 cf_api_functions["test_api_token"]="Test API Token"
 function test-token () {
     _debug "function:${FUNCNAME[0]}"
-    _running "Testing token via CLI"
+    _loading "Testing token via CLI"
     cf_api GET /client/v4/user/tokens/verify
     API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
     [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
@@ -406,7 +406,7 @@ function _cf_zone_create_bulk () {
     local COUNT=0
 
     # -- Confirm
-    _running2 "Creating zones in bulk"
+    _loading2 "Creating zones in bulk"
     echo "===================================="
     echo "File: $FILE"
     cat $FILE
@@ -426,7 +426,7 @@ function _cf_zone_create_bulk () {
             _warning "Blank line found in file"
             continue
         fi
-        _running "Creating zone $DOMAIN for account $ACCOUNT_ID with scan $SCAN"
+        _loading "Creating zone $DOMAIN for account $ACCOUNT_ID with scan $SCAN"
         _debug "DOMAIN: $DOMAIN - ACCOUNT_ID: $ACCOUNT_ID - SCAN: $SCAN"
         QUIET="1"
         CREATE_DATA="$(_cf_zone_create $ACCOUNT_ID $DOMAIN $SCAN)"
@@ -630,7 +630,7 @@ function _cf_zone_count_records_bulk () {
     local COUNT=0
 
     # -- Confirm
-    _running2 "Counting records in bulk"
+    _loading2 "Counting records in bulk"
     echo "===================================="
     echo "File: $FILE"
     cat $FILE
@@ -650,7 +650,7 @@ function _cf_zone_count_records_bulk () {
             _warning "Blank line found in file"
             continue
         fi
-        _running "Counting records for zone $DOMAIN"
+        _loading "Counting records for zone $DOMAIN"
         _debug "DOMAIN: $DOMAIN"
         QUIET="1"
         RECORD_COUNT="$(_cf_zone_count_records $DOMAIN)"
@@ -806,7 +806,7 @@ function _cf_find_record_by_name () {
     if [[ $MATCH_COUNT -eq 1 ]]; then
         SELECTED_RECORD_JSON=$(echo "$FILTERED_JSON" | jq '.[0]')
     else
-        _running2 "Multiple A/CNAME records found for $RECORD_NAME"
+        _loading2 "Multiple A/CNAME records found for $RECORD_NAME"
         echo ""
         printf "%-4s %-6s %-45s %-6s %-34s\n" "#" "Type" "Content" "Proxy" "Record ID"
         printf "%s\n" "$(printf '%0.s-' {1..100})"
@@ -1128,7 +1128,7 @@ cf_api_functions["cf_list_rules_action"]="List all rules"
 function cf_list_rules_action () {
     local DOMAIN_NAME=$1 ZONE_ID=$2
     _debug "function:${FUNCNAME[0]}"
-    _running "Listing all rules for ${DOMAIN}/${ZONE_ID}"
+    _loading "Listing all rules for ${DOMAIN}/${ZONE_ID}"
     cf_api GET /client/v4/zones/${ZONE_ID}/firewall/rules
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         _success "Success from API: $CURL_EXIT_CODE"
@@ -1195,7 +1195,7 @@ function cf_delete_rules_action () {
 	DOMAIN_NAME=$1
     ZONE_ID=$2
     OBJECT="${DOMAIN_NAME}/${ZONE_ID}"
-	_running2 "Deleting all rules on ${OBJECT}"
+	_loading2 "Deleting all rules on ${OBJECT}"
 	
     # -- Get a list of all rules
 	ZONE_RULES=$(cf_list_rules $ZONE_ID)
@@ -1207,7 +1207,7 @@ function cf_delete_rules_action () {
 		exit 1
 	else
 		# -- Print out rules
-		_running2 "Looping rules $ZONE_RULES_COUNT on ${OBJECT} to delete"
+		_loading2 "Looping rules $ZONE_RULES_COUNT on ${OBJECT} to delete"
 		echo ""
 		echo "$ZONE_RULES" | jq -r '.result[] | "\(.id) \(.description)"' | awk '{print "#" NR, $0}'
 		echo ""
@@ -1234,7 +1234,7 @@ function cf_delete_rules_action () {
                     FILTER_ID_DELETE=$FILTER_ID
                     FILTER_DESCRIPTION=$DESCRIPTION
                 done <<< "$RULE_OUTPUT"
-                _running3 "Rule: $RULE_ID Filter: $FILTER_ID_DELETE Description: $FILTER_DESCRIPTION"
+                _loading3 "Rule: $RULE_ID Filter: $FILTER_ID_DELETE Description: $FILTER_DESCRIPTION"
                 read -p "  - Delete rule? $RULE_ID (y|n)" yn
                 case $yn in
                     [Yy]* )
@@ -1273,7 +1273,7 @@ function cf_delete_rule_action () {
             FILTER_ID_DELETE=$FILTER_ID
             FILTER_DESCRIPTION=$DESCRIPTION
         done <<< "$RULE_EXISTS"
-        _running2 "Rule: $RULE_ID Filter: $FILTER_ID_DELETE Description: $FILTER_DESCRIPTION"
+        _loading2 "Rule: $RULE_ID Filter: $FILTER_ID_DELETE Description: $FILTER_DESCRIPTION"
         read -p "  - Delete rule? (y|n)" yn
         case $yn in
             [Yy]* )
@@ -1318,7 +1318,7 @@ function cf_list_filters_action () {
     local ZONE_ID=$2
 
     OBJECT="${DOMAIN_NAME}/${ZONE_ID}"
-    _running2 "Listing all filters for ${OBJECT}"
+    _loading2 "Listing all filters for ${OBJECT}"
 
     cf_api GET /client/v4/zones/${ZONE_ID}/filters
     if [[ $CURL_EXIT_CODE == "200" ]]; then
@@ -1386,7 +1386,7 @@ function cf_delete_filter_action () {
     local ZONE_ID=$2
     local FILTER_ID=$3
     OBJECT="${DOMAIN_NAME}/${ZONE_ID}"
-    _running2 "Deleting filter $FILTER_ID on $OBJECT"
+    _loading2 "Deleting filter $FILTER_ID on $OBJECT"
     cf_delete_filter $ZONE_ID $FILTER_ID
     if [[ $? -eq 0 ]]; then
         _success "Filter $FILTER_ID deleted"
@@ -1406,7 +1406,7 @@ function cf_delete_filters_action () {
     local ZONE_ID=$2
 
     OBJECT="${DOMAIN_NAME}/${ZONE_ID}"
-    _running2 "Deleting all filters on $OBJECT"
+    _loading2 "Deleting all filters on $OBJECT"
 
     # -- Get a list of all filters
     ZONE_FILTERS=$(CF_GET_FILTERS $ZONE_ID)
@@ -1418,7 +1418,7 @@ function cf_delete_filters_action () {
         exit 1
     else
         # -- Print out filters
-        _running2 "Looping filters $ZONE_FILTERS_COUNT on $OBJECT to delete"
+        _loading2 "Looping filters $ZONE_FILTERS_COUNT on $OBJECT to delete"
         echo ""
         echo "$ZONE_FILTERS" | jq -r '.result[] | "\(.id) \(.expression) \(.paused)"' | \
         awk '{print "#" NR, $0"\n----------------------------------------"}'
@@ -1435,7 +1435,7 @@ function cf_delete_filters_action () {
                 FILTER_EXPRESSION=$EXPRESSION
                 FILTER_PAUSED=$PAUSED
             done <<< "$FILTER_OUTPUT"
-            _running3 "Filter: $FILTER_ID_DELETE Expression: $FILTER_EXPRESSION Paused: $FILTER_PAUSED"
+            _loading3 "Filter: $FILTER_ID_DELETE Expression: $FILTER_EXPRESSION Paused: $FILTER_PAUSED"
             read -p " - Delete filter $FILTER_ID_DELETE? (y|n)" yn
             case $yn in
                 [Yy]* )
@@ -1501,7 +1501,7 @@ function _cf_tenant_create () {
         exit 1
     fi
 
-    _running2 "Getting tenant $NEW_TENANT_ID"
+    _loading2 "Getting tenant $NEW_TENANT_ID"
     CONFIRM_TENANT="$(_cf_tenant_get $NEW_TENANT_ID)"
     [[ $? -ne 0 ]] && _error "Couldn't get tenant" && exit 1
     _success "Tenant: $CONFIRM_TENANT"
@@ -1521,7 +1521,7 @@ function _cf_tenant_create_bulk () {
     local TENANT_IDS_CREATED
 
     # -- Print out all tenants about to be created
-    _running2 "Creating tenants from file: $FILE"
+    _loading2 "Creating tenants from file: $FILE"
     echo "===================================="
     cat $FILE
     echo "===================================="
@@ -1530,7 +1530,7 @@ function _cf_tenant_create_bulk () {
     read -p "Do you want to continue? (y|n) " yn
     case $yn in
         [Yy]* )
-        _running2 "Creating tenants"
+        _loading2 "Creating tenants"
         ;;
         [Nn]* ) exit;;
         * ) echo "Please answer yes or no.";;
@@ -1550,7 +1550,7 @@ function _cf_tenant_create_bulk () {
     # shellcheck disable=SC2034
     QUIET="0"
 
-    _running2 "Created $COUNT tenants"
+    _loading2 "Created $COUNT tenants"
     # -- Print out all tenants created into a file
     echo -e $TENANT_IDS_CREATED > $TMP_FILE
     _success "Tenants created: $TMP_FILE"
@@ -1755,7 +1755,7 @@ function _cf_tenant_access_get_member () {
     _debug "Getting tenant access"
     cf_api GET /client/v4/accounts/${TENANT_ID}/members/$MEMBER_ID
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _running2 "Member ID: $MEMBER_ID"
+        _loading2 "Member ID: $MEMBER_ID"
         echo "========================================"
         echo $API_OUTPUT | jq -r '.result | "ID: \(.user.id)\n First Name: \(.user.first_name)\n Last Name: \(.user.last_name)\n Email: \(.user.email)\n 2FA: \(.two_factor_authentication_enabled)\n Status: \(.status)"'
     else
@@ -1896,7 +1896,7 @@ function delete_turnstile () {
     _debug "function:${FUNCNAME[0]}"    
     cf_api DELETE /client/v4/accounts/${ACCOUNT_ID}/challenges/widgets/${TURNSTILE_ID}
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _running "Deleted turnstile $TURNSTILE_ID"
+        _loading "Deleted turnstile $TURNSTILE_ID"
     else
         _error "Couldn't delete turnstile, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
         echo "$MESG - $API_OUTPUT"
@@ -2003,7 +2003,7 @@ function _multi_zone_summary() {
 
     echo ""
     echo "========================================"
-    _running "Multi-Zone Operation Summary"
+    _loading "Multi-Zone Operation Summary"
     echo "========================================"
     echo "  Total zones:    $TOTAL"
     _success "Succeeded:      $SUCCESS"
@@ -2019,7 +2019,7 @@ function _multi_zone_summary() {
         echo ""
     fi
 
-    _running2 "Log file: $MULTI_ZONE_LOG"
+    _loading2 "Log file: $MULTI_ZONE_LOG"
 }
 
 # =====================================
@@ -2056,13 +2056,13 @@ function _process_multi_zone() {
 
     # Confirm before proceeding
     if ! _confirm_multi_zone; then
-        _running2 "Operation cancelled by user."
+        _loading2 "Operation cancelled by user."
         return 1
     fi
 
     for ZONE in "${ZONES_TO_PROCESS[@]}"; do
         ((CURRENT++))
-        _running "Processing zone $CURRENT of $TOTAL: $ZONE"
+        _loading "Processing zone $CURRENT of $TOTAL: $ZONE"
         
         # Execute the action function with the zone
         if "$ACTION_FUNC" "$ZONE" "${ACTION_ARGS[@]}"; then
@@ -2083,7 +2083,7 @@ function _process_multi_zone() {
 
         # Delay between zones (except for last one)
         if [[ $CURRENT -lt $TOTAL ]]; then
-            _running2 "Waiting ${MULTI_ZONE_DELAY}s before next zone..."
+            _loading2 "Waiting ${MULTI_ZONE_DELAY}s before next zone..."
             sleep "$MULTI_ZONE_DELAY"
         fi
     done

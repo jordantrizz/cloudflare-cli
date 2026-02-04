@@ -290,7 +290,8 @@ HELP_CHANGE="${HELP_CMDS_SHORT}
 Usage: cloudflare change
 
     zone <zone> <setting> <value> [<setting> <value> [ ... ]]
-    record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]]
+    record <zone-name|zone-id> <record-id> <setting> <value> [<setting> <value> [ ... ]]
+    record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
 
     Commands:
     ---------
@@ -306,12 +307,20 @@ Usage: cloudflare change
                 ipv6 [on | off]                
 
     record  - Change settings for <record>
+
+        Direct ID mode (recommended - faster, no zone search):
+            record <zone-name|zone-id> <record-id> <setting> <value> [<setting> <value> [ ... ]]
+            
+            Use 'cloudflare list records <zone>' to get record IDs.
+
+        Name-based mode (searches zones - slower):
+            record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
             
             You must enter \"type\" and the record type (A, MX, ...) when the record name is ambiguous, 
             or enter \"first\" to modify the first matching record in the zone,
             or enter \"oldcontent\" and the exact content of the record you want to modify if there are more records with the same name and type.
         
-        record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
+        Settings:
                 newname        Rename the record
                 newtype        Change type
                 content        See description in 'add record' command
@@ -669,6 +678,79 @@ function _die () {
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
 # -----------------------------------------------
+# -- _cf_get_record
+# -- Fetch a single DNS record by zone_id and record_id
+# -- Sets globals: record_name, record_type, record_ttl, record_content
+# -- Returns: 0 on success, 1 on error
+# -----------------------------------------------
+function _cf_get_record () {
+	local l_zone_id=$1
+	local l_record_id=$2
+	
+	[[ -z $l_zone_id ]] && _error "Missing zone_id" && return 1
+	[[ -z $l_record_id ]] && _error "Missing record_id" && return 1
+	
+	_debug "function:${FUNCNAME[0]} - Fetching record $l_record_id from zone $l_zone_id"
+	
+	# Build curl headers based on authentication method
+	local CURL_HEADERS=()
+	if [[ -n $API_TOKEN ]]; then
+		CURL_HEADERS=("-H" "Authorization: Bearer ${API_TOKEN}")
+	elif [[ -n $API_ACCOUNT ]]; then
+		CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" "-H" "X-Auth-Email: ${API_ACCOUNT}")
+	else
+		_error "No API Token or API Key found"
+		return 1
+	fi
+	
+	# Make API call - use CF_API_ENDPOINT which already includes /client/v4
+	local API_PATH="/zones/${l_zone_id}/dns_records/${l_record_id}"
+	local CURL_OUTPUT_FILE
+	CURL_OUTPUT_FILE=$(mktemp)
+	
+	_debug "Calling: curl -s --url ${CF_API_ENDPOINT}${API_PATH}"
+	
+	local CURL_EXIT_CODE
+	CURL_EXIT_CODE=$(curl -s --output "$CURL_OUTPUT_FILE" -w "%{http_code}" --request "GET" \
+		--url "${CF_API_ENDPOINT}${API_PATH}" \
+		"${CURL_HEADERS[@]}")
+	
+	local API_OUTPUT
+	API_OUTPUT=$(<"$CURL_OUTPUT_FILE")
+	rm -f "$CURL_OUTPUT_FILE"
+	
+	_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
+	_debug "API_OUTPUT: $API_OUTPUT"
+	
+	# Check HTTP status code
+	if [[ $CURL_EXIT_CODE != "200" ]]; then
+		local errors
+		errors=$(echo "$API_OUTPUT" | jq -r '.errors[]?.message // "Unknown error"' 2>/dev/null)
+		_error "Failed to fetch record (HTTP $CURL_EXIT_CODE): $errors"
+		return 1
+	fi
+	
+	# Check if result exists and is not null
+	local success
+	success=$(echo "$API_OUTPUT" | jq -r '.success // false')
+	if [[ "$success" != "true" ]]; then
+		local errors
+		errors=$(echo "$API_OUTPUT" | jq -r '.errors[]?.message // "Unknown error"')
+		_error "Record not found: $errors"
+		return 1
+	fi
+	
+	# Set global variables from response
+	record_name=$(echo "$API_OUTPUT" | jq -r '.result.name')
+	record_type=$(echo "$API_OUTPUT" | jq -r '.result.type')
+	record_ttl=$(echo "$API_OUTPUT" | jq -r '.result.ttl')
+	record_content=$(echo "$API_OUTPUT" | jq -r '.result.content')
+	
+	_debug "function:${FUNCNAME[0]} - Found record: name=$record_name type=$record_type ttl=$record_ttl"
+	return 0
+}
+
+# -----------------------------------------------
 # -- _escape_string
 # -- Escape json with slashes for curl
 # -----------------------------------------------
@@ -809,9 +891,16 @@ function call_cf_v4 () {
 			# TODO: Replace json_decode with jq for better reliability and performance
 			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
 			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
+			local JSON_DECODE_EXIT=$?
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
             _debug "\$@ == $@"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
+
+			# Check if json_decode reported an API error (exit code 2)
+			if [[ $JSON_DECODE_EXIT -eq 2 ]]; then
+				_debug "API returned an error (json_decode exit 2)"
+				return 1
+			fi
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
 				_debug "More results available"
@@ -847,9 +936,8 @@ findout_record() {
 	declare -g record_type=${2^^}
 	local first_match=$3
 	local record_oldcontent=$4
-	local zname_zid
-	local zid
 	local test_record
+	local try_zone
 	declare -g zone_id=''
 	declare -g zone=''
 	declare -g record_id=''
@@ -857,16 +945,17 @@ findout_record() {
 	declare -g record_content=''
 	echo -n "Searching zone ... "
 
-	for zname_zid in $(call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id);	do
-		zone=${zname_zid%%:*}
-		zone=${zone,,}
-		zid=${zname_zid##*:}
-		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
-			# TODO why is subdomain never used?
-			subdomain=${BASH_REMATCH[2]}
-			zone_id=$zid
+	# Try progressively shorter domain parts to find the zone
+	# e.g., for sub.example.com try: sub.example.com, example.com, com
+	try_zone="$record_name"
+	while [[ "$try_zone" == *.* ]]; do
+		zone_id=$(_cf_zone_id "$try_zone" 2>/dev/null)
+		if [[ -n "$zone_id" && "$zone_id" != "null" ]]; then
+			zone="$try_zone"
 			break
 		fi
+		# Strip the leftmost label
+		try_zone="${try_zone#*.}"
 	done
 	[ -z "$zone_id" ] && { echo >&2; return 2; }
 	echo -n "$zone, searching record ... "
@@ -876,7 +965,8 @@ findout_record() {
 	IFS=$NL
 	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
 		IFS=$oldIFS
-		set -- "$test_record"
+		# shellcheck disable=SC2086
+		set -- $test_record
 		test_record_name=$1
 		shift
 

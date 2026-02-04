@@ -41,13 +41,13 @@ function _cf_bulkredirect_help() {
 # -- Export
 function _cf_bulkredirect_export() {
     local FILE="${1}.csv" DOMAIN="${1}"
-    _running "Exporting redirects to CSV file for Domain: ${DOMAIN} to ${FILE}"
+    _loading "Exporting redirects to CSV file for Domain: ${DOMAIN} to ${FILE}"
     ZONE_ID=$(_cf_zone_id "${DOMAIN}")
-    _running "Getting all redirects..."
+    _loading "Getting all redirects..."
     call_cf_v4 "zones/${ZONE_ID}/pagerules" > "${FILE}"
 
     # -- Export to CSV
-    _running "Exporting to CSV..."
+    _loading "Exporting to CSV..."
     _success "Done!"
 }
 
@@ -64,7 +64,7 @@ function _add() {
 # -- Get Lists
 function _cf_bulkredirect_get_lists() {
     local ACCOUNT="${1}" OUTPUT    
-    _running "Getting all lists for account: ${ACCOUNT}"
+    _loading "Getting all lists for account: ${ACCOUNT}"
     OUTPUT="ID\tName\tKind\tItems\n"
     OUTPUT+="--\t----\t----\t-----\n"
     OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists -- .result ,id,name,kind,num_items)
@@ -74,7 +74,7 @@ function _cf_bulkredirect_get_lists() {
 # -- Get List
 function _cf_bulkredirect_get_list() {
     local ACCOUNT="${1}" LIST_ID="${2}" OUTPUT
-    _running "Getting list: ${LIST_ID} for account: ${ACCOUNT}"
+    _loading "Getting list: ${LIST_ID} for account: ${ACCOUNT}"
     #OUTPUT="ID\tName\tKind\tItems\n"
     #OUTPUT+="--\t----\t----\t-----\n"
     OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists/${LIST_ID}/items -- .result .redirect ,source_url)
@@ -83,7 +83,7 @@ function _cf_bulkredirect_get_list() {
 
 # -- Get Account ID from API Token
 function _cf_bulkredirect_get_account() {    
-    _running "Getting account details..."
+    _loading "Getting account details..."
     call_cf_v4 GET /accounts -- .result ,id,name %"%s$TA%s$TA#%s$TA%s$TA%s$NL"
 }
 
@@ -106,7 +106,7 @@ do
 		--test) shift
 			TEST=$1;;
 		-D|--debug)
-            _running "Debug mode enabled"
+            _loading "Debug mode enabled"
 			DEBUG=1;;
 		-DC|--debug-curl)
 			DEBUG=1
@@ -136,7 +136,7 @@ fi
 
 # -- Debug
 CMD_ALL="${*}"
-_running "Running: ${CMD_ALL}"
+_loading "Running: ${CMD_ALL}"
 
 # ===============================================
 # -- Main
