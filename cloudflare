@@ -1029,10 +1029,18 @@ account)
 	case "$CMD" in
 	list)
 		_pre_flight_check CF_
-		_loading "Getting list of accounts"
-		ACCOUNT_LIST_OUTPUT="Name\tID\tType\tCreated Date\n"
-		ACCOUNT_LIST_OUTPUT+=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
-		echo -e "$ACCOUNT_LIST_OUTPUT" | column -t -s $'\t'
+		ACCOUNT_SEARCH="$1"
+		if [[ -n "$ACCOUNT_SEARCH" ]]; then
+			_loading "Searching for *${ACCOUNT_SEARCH}* in account names"
+		else
+			_loading "Getting list of accounts"
+		fi
+		ACCOUNT_LIST_HEADER="Name\tID\tType\tCreated Date\n"
+		ACCOUNT_LIST_DATA=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
+		if [[ -n "$ACCOUNT_SEARCH" ]]; then
+			ACCOUNT_LIST_DATA=$(echo -e "$ACCOUNT_LIST_DATA" | grep -i "$ACCOUNT_SEARCH")
+		fi
+		echo -e "${ACCOUNT_LIST_HEADER}${ACCOUNT_LIST_DATA}" | column -t -s $'\t'
 
 		;;
 	detail)
