@@ -5,6 +5,8 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
 API_PROFILE=""
+# Default account id for create-style commands (set via --account-id)
+CLI_ACCOUNT_ID=""
 # Multi-zone processing globals
 declare -a CLI_ZONES=()
 declare -a ZONES_TO_PROCESS=()
@@ -73,6 +75,14 @@ do
 			fi
 			API_PROFILE="$1"
 			_debug "Using profile: $API_PROFILE"
+			;;
+		-A|--account-id)
+			shift
+			if [ -z "$1" ]; then
+				_die "Usage: cloudflare --account-id <account_id>"
+			fi
+			CLI_ACCOUNT_ID="$1"
+			_debug "Default account id specified: $CLI_ACCOUNT_ID"
 			;;
 		-h|--help)
 			help full
@@ -385,18 +395,36 @@ add)
 		# Usage: cloudflare add zone <zone> [account-id] 
 		DOMAIN="$1"
 		ACCOUNT_ID="$2"
+		# Prefer explicit --account-id over positional
+		if [[ -n "$CLI_ACCOUNT_ID" ]]; then
+			ACCOUNT_ID="$CLI_ACCOUNT_ID"
+		fi
+
+		# Bulk mode: if zones were specified via -z/-f and no domain is given
+		# Also support: cloudflare -f zones.txt add zone <account-id>
+		if [[ ${#ZONES_TO_PROCESS[@]} -gt 0 && ( -z "$DOMAIN" || ( ${#DOMAIN} -eq 32 && "$DOMAIN" != *.* ) ) ]]; then
+			# If DOMAIN looks like an account id and no explicit account id given, treat it as account id
+			if [[ -z "$ACCOUNT_ID" && -n "$DOMAIN" && ${#DOMAIN} -eq 32 && "$DOMAIN" != *.* ]]; then
+				ACCOUNT_ID="$DOMAIN"
+				DOMAIN=""
+			fi
+			_loading2 "Creating ${#ZONES_TO_PROCESS[@]} zone(s)${ACCOUNT_ID:+ under account $ACCOUNT_ID}"
+			echo -e "Zone\tID\tName Servers"
+			echo -e "----\t--\t------------"
+			_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+			return $?
+		fi
+
 		if [ -z "$DOMAIN" ]; then
-			_die "Usage: cloudflare add zone <zone> [account-id]"					
+			_die "Usage: cloudflare add zone <zone> [account-id]"				
 		fi
 
 		# Check if zone already exists
 		_loading2 "Checking if zone $DOMAIN already exists"		
-		ZONE_ID=$(_cf_zone_id "$DOMAIN")			
-		if [ $? ]; then
-			_loading2 "Zone $DOMAIN does not exist"
-		else
+		ZONE_ID=$(_cf_zone_id "$DOMAIN")
+		if [[ -n "$ZONE_ID" ]]; then
 			_error "Zone $DOMAIN already exists with ID $ZONE_ID"
-			exit
+			exit 1
 		fi
 
 
@@ -423,8 +451,8 @@ add)
 		echo ""
 
 		_notice "Please make sure to update your name servers to the following:"
-		# Get name servers
-		echo "$CREATE_ZONE_OUTPUT_CMD" | awk '{print $5}'
+		# Get name servers (field 5 is name_servers; keep it tab-safe)
+		echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $5}' | tr ', ' '\n' | sed '/^$/d' | sed 's/^/  - /'
 
 		;;
 	*)
@@ -432,6 +460,47 @@ add)
 	echo ""
 	_die "Missing sub-command"
 	esac
+	;;
+
+# =================================================================================================
+# -- bulk command
+# =================================================================================================
+bulk)
+	CMD2=$1
+	shift || true
+	case "$CMD2" in
+		zone|zones)
+			CMD3=$1
+			shift || true
+			case "$CMD3" in
+				add)
+					_pre_flight_check CF_
+					ACCOUNT_ID="${CLI_ACCOUNT_ID:-}"
+					if [[ -z "$ACCOUNT_ID" ]]; then
+						ACCOUNT_ID="${1:-}"
+					fi
+					if [[ ${#ZONES_TO_PROCESS[@]} -eq 0 ]]; then
+						_die "Usage: cloudflare (-f <zones-file> | -z <zone> [-z <zone> ...]) [--account-id <account_id>] bulk zone add [account_id]"
+					fi
+					if [[ -z "$ACCOUNT_ID" ]]; then
+						_die "Missing account id. Use --account-id <account_id> or provide it as the final argument."
+					fi
+					_loading2 "Bulk creating ${#ZONES_TO_PROCESS[@]} zone(s) under account $ACCOUNT_ID"
+					echo -e "Zone\tID\tName Servers"
+					echo -e "----\t--\t------------"
+					_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+					;;
+				*)
+					help bulk zone add
+					_die "Usage: cloudflare bulk zone add" 1
+					;;
+				esac
+			;;
+		*)
+			help bulk zone add
+			_die "Usage: cloudflare bulk zone add" 1
+			;;
+		esac
 	;;
 
 # =================================================================================================
@@ -1135,7 +1204,11 @@ functions)
 	_list_core_functions
 	;;
 help)
-	help usage
+	if [[ -n "${1:-}" ]]; then
+		help "$@"
+	else
+		help full
+	fi
 	;;
 *)
 	help usage

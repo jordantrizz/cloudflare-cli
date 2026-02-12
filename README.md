@@ -52,6 +52,19 @@ Then use it:
 cloudflare -f zones.txt clear cache
 ```
 
+## Bulk create zones under an account
+If you want to create many zones under a specific account, combine `-f` (or repeated `-z`) with `add zone` and an account id:
+
+```bash
+# Create all zones from zones.txt under the given account id
+cloudflare -f zones.txt --account-id <account_id> add zone
+
+# Alternative form (account id as the parameter after `add zone`)
+cloudflare -f zones.txt add zone <account_id>
+```
+
+The output includes the assigned Cloudflare nameservers per zone (these are the nameservers you update at your registrar).
+
 ## Combine both methods
 ```bash
 cloudflare -z extra-zone.com -f zones.txt clear cache

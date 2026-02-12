@@ -29,18 +29,20 @@ HELP_VERSION="Version: $VERSION"
 # -----------------------------------------------
 HELP_OPTIONS="Options:
 ---------
-    --details, -d       Display detailed info where possible
-    --debug, -D         Display API debugging info
-    --debug-curl, -DC   Display API debugging info and curl output
-    --quiet, -q         Less verbose
-    -E <email>          Cloudflare Email
-    -T <api_token>      Cloudflare API Token
-    -p, --profile NAME  Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
+	--details, -d          Display detailed info where possible
+	--debug, -D            Display API debugging info
+	--debug-curl, -DC      Display API debugging info and curl output
+	--quiet, -q            Less verbose
+	-E <email>             Cloudflare Email
+	-T <api_token>         Cloudflare API Token
+	-p, --profile NAME     Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
+	-A, --account-id ID    Default account id for commands that create resources (e.g. bulk add zone)
 
 Multi-Zone Options:
     -z, --zone <zone>   Specify zone (can be repeated for multiple zones)
     -f, --zones-file    Read zones from file (one per line, # comments)
     --continue-on-error Continue processing despite individual zone failures"
+
 
 # -----------------------------------------------
 # -- HELP_FULL
@@ -141,15 +143,16 @@ Enter \"cloudflare help\" to list available commands."
 # -----------------------------------------------
 HELP_CMDS="Commands:
 ----------
-    account     list,details,zones
-    list        zone, zones, settings, records, listing
-    add         zone, record, whitelist, blacklist, challenge
-    delete      zone, record, listing
-    change      zone, record
-    clear       cache
-    invalidate  url
-    template    list, apply
-    search      zone, record
+	account     list,details,zones
+	list        zone, zones, settings, records, listing
+	add         zone, record, whitelist, blacklist, challenge
+	bulk        zone add
+	delete      zone, record, listing
+	change      zone, record
+	clear       cache
+	invalidate  url
+	template    list, apply
+	search      zone, record
 
 Additional Commands:
 --------------------
@@ -163,7 +166,7 @@ Additional Commands:
 # -----------------------------------------------
 # -- HELP_CMDS_SHORT
 # -----------------------------------------------
-HELP_CMDS_SHORT="Commands: list, add, delete, change, clear, check, json, help, examples"
+HELP_CMDS_SHORT="Commands: list, add, bulk, delete, change, clear, check, json, help, examples"
 
 # -----------------------------------------------
 # -- HELP_EXAMPLES
@@ -194,7 +197,163 @@ $ cloudflare -f zones.txt clear cache
 $ cloudflare -z extra.com -f zones.txt clear cache
 
 # Continue despite errors
-$ cloudflare -f zones.txt --continue-on-error clear cache"
+$ cloudflare -f zones.txt --continue-on-error clear cache
+
+Zone Creation Examples:
+
+# Create one zone (prints assigned nameservers)
+$ cloudflare add zone example.com
+
+# Create one zone under a specific account id
+$ cloudflare --account-id <account_id> add zone example.com
+
+# Bulk create zones from file under a specific account id (one zone per line)
+$ cloudflare -f zones.txt --account-id <account_id> add zone
+
+# Alternate bulk form (account id provided after command)
+$ cloudflare -f zones.txt add zone <account_id>"
+
+HELP_BULK_ZONE_ADD="${HELP_CMDS_SHORT}
+
+Usage: cloudflare [Options] (-f <zones-file> | -z <zone> [-z <zone> ...]) bulk zone add [account_id]
+
+Bulk create zones under a specific account id.
+
+Examples:
+	cloudflare -f zones.txt --account-id <account_id> bulk zone add
+	cloudflare -f zones.txt bulk zone add <account_id>
+	cloudflare -z example.com -z example.org --account-id <account_id> bulk zone add
+
+Notes:
+	- The output includes the nameservers you must set at your registrar.
+	- Use --continue-on-error to keep going after failures.
+
+${HELP_VERSION}"
+
+# Rebuild HELP_FULL now that HELP_EXAMPLES is defined.
+# Bash expands ${HELP_EXAMPLES} at assignment time, so defining HELP_FULL earlier
+# would embed an empty value.
+HELP_FULL="Usage: cloudflare [Options] <command> <parameters>
+
+Main Commands:
+---------
+	account    - Show account information
+				list
+				details <account_id>
+				zones <account_id>
+	list        - Show information about an object
+					zone <zone>
+					zones
+					settings <zone>
+					records <zone>
+					access-lists <zone>
+
+	add         - Create Object
+					zone
+					record
+					whitelist
+					blacklist
+					challenge
+
+	bulk        - Bulk operations
+					zone add
+
+	delete      - Delete Objects
+					zone
+					record
+					listing
+
+	change      - Change Object
+					zone
+					record
+
+	template    - Apply template to zone
+					list
+					apply <zone> <template>
+
+	search     - Search for object
+					zone <query> (Return one zone)
+					zones <query> (Return all zones that match)
+					record <query>
+
+	clear       - Clear cache
+					cache <zone>
+					invalidate <url>
+
+	invalidate  - Invalidate cache
+					<url> url to invalidate
+
+Additional Commands:
+--------------------
+	profiles   - List profiles
+
+	check       - Activate check
+					zone <zone>
+
+	json        - Test json_decode function
+				PIPE| json <format>
+
+	pass        - Pass through queries to CF API
+				<method> <url> [parameters]
+				Example: cloudflare pass GET /zones
+
+	help        - Full help
+
+	examples - Show Examples
+
+Environment variables:
+	CF_ACCOUNT       - email address (as -E option)
+	CF_KEY           - global API key for account auth
+	CF_TOKEN         - API token (as -T option)
+	CF_PROFILE       - default profile name (same as --profile)
+
+Configuration file for credentials (~/.cloudflare):
+	# Default credentials
+	CF_ACCOUNT=example@example.com
+	CF_KEY=global-api-key
+	CF_TOKEN=default-token
+
+	# Named profiles
+	CF_ACCOUNT_WORK=work@example.com
+	CF_KEY_WORK=work-global-key
+	CF_TOKEN_PROD=long-production-token
+
+Examples:
+	cloudflare --profile work show zones
+	cloudflare --profile prod add record example.com A www 203.0.113.10
+
+${HELP_OPTIONS}
+
+${HELP_EXAMPLES}
+${HELP_VERSION}
+
+Enter \"cloudflare help\" to list available commands."
+
+# -----------------------------------------------
+# -- HELP_ADD_ZONE
+# -----------------------------------------------
+HELP_ADD_ZONE="${HELP_CMDS_SHORT}
+
+Usage: cloudflare [Options] add zone [<zone>] [account-id]
+
+Create a Cloudflare zone.
+
+Single-zone:
+	cloudflare add zone example.com
+	cloudflare add zone example.com <account_id>
+	cloudflare --account-id <account_id> add zone example.com
+
+Bulk create zones (use -z/-f):
+	cloudflare -f zones.txt --account-id <account_id> add zone
+	cloudflare -z example.com -z example.org --account-id <account_id> add zone
+	cloudflare -f zones.txt add zone <account_id>
+
+Notes:
+	- Bulk mode uses one zone per line in zones.txt (comments with # allowed).
+	- The output includes the nameservers you must set at your registrar.
+	- Use --continue-on-error to keep going after failures.
+
+${HELP_VERSION}"
 
 # -----------------------------------------------
 # -- HELP_USAGE
@@ -290,8 +449,7 @@ HELP_CHANGE="${HELP_CMDS_SHORT}
 Usage: cloudflare change
 
     zone <zone> <setting> <value> [<setting> <value> [ ... ]]
-    record <zone-name|zone-id> <record-id> <setting> <value> [<setting> <value> [ ... ]]
-    record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
+    record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]]
 
     Commands:
     ---------
@@ -307,20 +465,12 @@ Usage: cloudflare change
                 ipv6 [on | off]                
 
     record  - Change settings for <record>
-
-        Direct ID mode (recommended - faster, no zone search):
-            record <zone-name|zone-id> <record-id> <setting> <value> [<setting> <value> [ ... ]]
-            
-            Use 'cloudflare list records <zone>' to get record IDs.
-
-        Name-based mode (searches zones - slower):
-            record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
             
             You must enter \"type\" and the record type (A, MX, ...) when the record name is ambiguous, 
             or enter \"first\" to modify the first matching record in the zone,
             or enter \"oldcontent\" and the exact content of the record you want to modify if there are more records with the same name and type.
         
-        Settings:
+        record <name> [type <type> | first | oldcontent <content>] <setting> <value> [<setting> <value> [ ... ]]
                 newname        Rename the record
                 newtype        Change type
                 content        See description in 'add record' command
@@ -371,12 +521,35 @@ shift
 		add)
 			cmd2="$1"					
 			case "$cmd2" in
+				zone)
+				echo "$HELP_ADD_ZONE"
+				;;
 				record)
 				
 				echo "$HELP_ADD_RECORD"
 				;;
 				*)
 				echo "$HELP_CMDS"
+			esac
+		;;
+		bulk)
+			cmd2="$1"
+			shift || true
+			case "$cmd2" in
+				zone|zones)
+					cmd3="$1"
+					case "$cmd3" in
+						add)
+						echo "$HELP_BULK_ZONE_ADD"
+						;;
+						*)
+						echo "$HELP_BULK_ZONE_ADD"
+						;;
+					esac
+					;;
+				*)
+				echo "$HELP_BULK_ZONE_ADD"
+				;;
 			esac
 		;;
 		clear)
@@ -678,79 +851,6 @@ function _die () {
 is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 
 # -----------------------------------------------
-# -- _cf_get_record
-# -- Fetch a single DNS record by zone_id and record_id
-# -- Sets globals: record_name, record_type, record_ttl, record_content
-# -- Returns: 0 on success, 1 on error
-# -----------------------------------------------
-function _cf_get_record () {
-	local l_zone_id=$1
-	local l_record_id=$2
-	
-	[[ -z $l_zone_id ]] && _error "Missing zone_id" && return 1
-	[[ -z $l_record_id ]] && _error "Missing record_id" && return 1
-	
-	_debug "function:${FUNCNAME[0]} - Fetching record $l_record_id from zone $l_zone_id"
-	
-	# Build curl headers based on authentication method
-	local CURL_HEADERS=()
-	if [[ -n $API_TOKEN ]]; then
-		CURL_HEADERS=("-H" "Authorization: Bearer ${API_TOKEN}")
-	elif [[ -n $API_ACCOUNT ]]; then
-		CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" "-H" "X-Auth-Email: ${API_ACCOUNT}")
-	else
-		_error "No API Token or API Key found"
-		return 1
-	fi
-	
-	# Make API call - use CF_API_ENDPOINT which already includes /client/v4
-	local API_PATH="/zones/${l_zone_id}/dns_records/${l_record_id}"
-	local CURL_OUTPUT_FILE
-	CURL_OUTPUT_FILE=$(mktemp)
-	
-	_debug "Calling: curl -s --url ${CF_API_ENDPOINT}${API_PATH}"
-	
-	local CURL_EXIT_CODE
-	CURL_EXIT_CODE=$(curl -s --output "$CURL_OUTPUT_FILE" -w "%{http_code}" --request "GET" \
-		--url "${CF_API_ENDPOINT}${API_PATH}" \
-		"${CURL_HEADERS[@]}")
-	
-	local API_OUTPUT
-	API_OUTPUT=$(<"$CURL_OUTPUT_FILE")
-	rm -f "$CURL_OUTPUT_FILE"
-	
-	_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
-	_debug "API_OUTPUT: $API_OUTPUT"
-	
-	# Check HTTP status code
-	if [[ $CURL_EXIT_CODE != "200" ]]; then
-		local errors
-		errors=$(echo "$API_OUTPUT" | jq -r '.errors[]?.message // "Unknown error"' 2>/dev/null)
-		_error "Failed to fetch record (HTTP $CURL_EXIT_CODE): $errors"
-		return 1
-	fi
-	
-	# Check if result exists and is not null
-	local success
-	success=$(echo "$API_OUTPUT" | jq -r '.success // false')
-	if [[ "$success" != "true" ]]; then
-		local errors
-		errors=$(echo "$API_OUTPUT" | jq -r '.errors[]?.message // "Unknown error"')
-		_error "Record not found: $errors"
-		return 1
-	fi
-	
-	# Set global variables from response
-	record_name=$(echo "$API_OUTPUT" | jq -r '.result.name')
-	record_type=$(echo "$API_OUTPUT" | jq -r '.result.type')
-	record_ttl=$(echo "$API_OUTPUT" | jq -r '.result.ttl')
-	record_content=$(echo "$API_OUTPUT" | jq -r '.result.content')
-	
-	_debug "function:${FUNCNAME[0]} - Found record: name=$record_name type=$record_type ttl=$record_ttl"
-	return 0
-}
-
-# -----------------------------------------------
 # -- _escape_string
 # -- Escape json with slashes for curl
 # -----------------------------------------------
@@ -891,16 +991,9 @@ function call_cf_v4 () {
 			# TODO: Replace json_decode with jq for better reliability and performance
 			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
 			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
-			local JSON_DECODE_EXIT=$?
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
             _debug "\$@ == $@"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
-
-			# Check if json_decode reported an API error (exit code 2)
-			if [[ $JSON_DECODE_EXIT -eq 2 ]]; then
-				_debug "API returned an error (json_decode exit 2)"
-				return 1
-			fi
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
 				_debug "More results available"
@@ -913,6 +1006,41 @@ function call_cf_v4 () {
 		CURL_OUTPUT_GLOBAL="$PROCESSED_OUTPUT"
 		return $CURL_EXIT_CODE
 	fi
+}
+
+# ==============================================================================================
+# -- Zone helpers (cloudflare.sh keeps logic thin)
+# ==============================================================================================
+
+# -----------------------------------------------
+# -- _cf_zone_create_v4 <zone_name> [account_id]
+# -- Create a zone via the v4 API and print a single tab-separated line:
+# --   <zone>\t<zone_id>\t<name_servers>
+# -- Returns non-zero on failure.
+# -----------------------------------------------
+function _cf_zone_create_v4 () {
+	local DOMAIN="$1"
+	local ACCOUNT_ID="$2"
+	local JSON
+	local CREATE_ZONE_OUTPUT_CMD
+	local ZONE_ID
+	local NAME_SERVERS
+
+	[[ -z "$DOMAIN" ]] && _error "Missing zone name" && return 1
+
+	if [[ -n "$ACCOUNT_ID" ]]; then
+		JSON="{\"account\":{\"id\":\"$ACCOUNT_ID\"},\"name\":\"$DOMAIN\",\"jump_start\":true}"
+	else
+		JSON="{\"name\":\"$DOMAIN\",\"jump_start\":true}"
+	fi
+
+	CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers) || return 1
+
+	ZONE_ID=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $4}')
+	NAME_SERVERS=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $5}')
+
+	echo -e "${DOMAIN}\t${ZONE_ID}\t${NAME_SERVERS}"
+	return 0
 }
 
 # ===============================================
@@ -936,8 +1064,9 @@ findout_record() {
 	declare -g record_type=${2^^}
 	local first_match=$3
 	local record_oldcontent=$4
+	local zname_zid
+	local zid
 	local test_record
-	local try_zone
 	declare -g zone_id=''
 	declare -g zone=''
 	declare -g record_id=''
@@ -945,17 +1074,16 @@ findout_record() {
 	declare -g record_content=''
 	echo -n "Searching zone ... "
 
-	# Try progressively shorter domain parts to find the zone
-	# e.g., for sub.example.com try: sub.example.com, example.com, com
-	try_zone="$record_name"
-	while [[ "$try_zone" == *.* ]]; do
-		zone_id=$(_cf_zone_id "$try_zone" 2>/dev/null)
-		if [[ -n "$zone_id" && "$zone_id" != "null" ]]; then
-			zone="$try_zone"
+	for zname_zid in $(call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id);	do
+		zone=${zname_zid%%:*}
+		zone=${zone,,}
+		zid=${zname_zid##*:}
+		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
+			# TODO why is subdomain never used?
+			subdomain=${BASH_REMATCH[2]}
+			zone_id=$zid
 			break
 		fi
-		# Strip the leftmost label
-		try_zone="${try_zone#*.}"
 	done
 	[ -z "$zone_id" ] && { echo >&2; return 2; }
 	echo -n "$zone, searching record ... "
@@ -965,8 +1093,7 @@ findout_record() {
 	IFS=$NL
 	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
 		IFS=$oldIFS
-		# shellcheck disable=SC2086
-		set -- $test_record
+		set -- "$test_record"
 		test_record_name=$1
 		shift
 

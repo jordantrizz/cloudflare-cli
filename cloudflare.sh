@@ -5,6 +5,8 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
 API_PROFILE=""
+# Default account id for create-style commands (set via --account-id)
+CLI_ACCOUNT_ID=""
 # Multi-zone processing globals
 declare -a CLI_ZONES=()
 declare -a ZONES_TO_PROCESS=()
@@ -74,6 +76,14 @@ do
 			API_PROFILE="$1"
 			_debug "Using profile: $API_PROFILE"
 			;;
+		-A|--account-id)
+			shift
+			if [ -z "$1" ]; then
+				_die "Usage: cloudflare --account-id <account_id>"
+			fi
+			CLI_ACCOUNT_ID="$1"
+			_debug "Default account id specified: $CLI_ACCOUNT_ID"
+			;;
 		-h|--help)
 			help full
 			_die
@@ -105,9 +115,9 @@ fi
 
 # -- Debug full command (post-option parsing)
 CMD_ALL="${*}"
-_loading "Running: ${CMD_ALL}"
+_running "Running: ${CMD_ALL}"
 if [[ -n "$API_PROFILE" ]]; then
-	_loading2 "Using profile: $API_PROFILE"
+	_running2 "Using profile: $API_PROFILE"
 fi
 
 # =================================================================================================
@@ -133,7 +143,7 @@ show|list)
 		_cf_zone_exists "$DOMAIN"
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
 		if [ $? ]; then
-			_loading2 "Getting zone details for $DOMAIN with ID $ZONE_ID"
+			_running2 "Getting zone details for $DOMAIN with ID $ZONE_ID"
 			LIST_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 			LIST_ZONE_OUTPUT+="----\t------\t----\t--\t------------\t-------------------\n"
 			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
@@ -159,7 +169,7 @@ show|list)
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID="$(_cf_zone_id "$CLI_ZONE")"
 		if [ $? ]; then
-			_loading2 "Getting settings for $CLI_ZONE"
+			_running2 "Getting settings for $CLI_ZONE"
 		else
 			_die "No zone found for $CLI_ZONE"
 		fi
@@ -175,7 +185,7 @@ show|list)
 	# -- records (all records for a zone)
 	records)
 		_pre_flight_check CF_
-		_loading "Running: cloudflare $CMD1 records $*"
+		_running "Running: cloudflare $CMD1 records $*"
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
@@ -192,7 +202,7 @@ show|list)
 	record)
 		_pre_flight_check CF_
 		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
-		_loading "Getting record details for $1"
+		_running "Getting record details for $1"
 		_cf_get_record_by_name "$1"
 		;;
 
@@ -223,6 +233,49 @@ show|list)
 		fi
 		;;
 	esac
+	;;
+
+# =================================================================================================
+# -- bulk command
+# =================================================================================================
+bulk)
+	CMD2=$1
+	shift || true
+	case "$CMD2" in
+		zone|zones)
+			CMD3=$1
+			shift || true
+			case "$CMD3" in
+				add)
+					_pre_flight_check CF_
+					# Usage:
+					#   cloudflare -f zones.txt --account-id <account_id> bulk zone add
+					#   cloudflare -f zones.txt bulk zone add <account_id>
+					ACCOUNT_ID="${CLI_ACCOUNT_ID:-}"
+					if [[ -z "$ACCOUNT_ID" ]]; then
+						ACCOUNT_ID="${1:-}"
+					fi
+					if [[ ${#ZONES_TO_PROCESS[@]} -eq 0 ]]; then
+						_die "Usage: cloudflare (-f <zones-file> | -z <zone> [-z <zone> ...]) [--account-id <account_id>] bulk zone add [account_id]"
+					fi
+					if [[ -z "$ACCOUNT_ID" ]]; then
+						_die "Missing account id. Use --account-id <account_id> or provide it as the final argument."
+					fi
+
+					_running2 "Bulk creating ${#ZONES_TO_PROCESS[@]} zone(s) under account $ACCOUNT_ID"
+					echo -e "Zone\tID\tName Servers"
+					echo -e "----\t--\t------------"
+					_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+					;;
+				*)
+					_die "Usage: cloudflare bulk zone add"
+					;;
+				esac
+			;;
+		*)
+			_die "Usage: cloudflare bulk zone add"
+			;;
+		esac
 	;;
 
 # =================================================================================================
@@ -262,17 +315,17 @@ add)
 		[ -n "$prio" ] || prio=10
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		
-		_loading2 "Getting zone_id for $ZONE"
+		_running2 "Getting zone_id for $ZONE"
 		_cf_zone_exists "$ZONE"
 		ZONE_ID="$(_cf_zone_id "$ZONE")"
-		_loading2 " - Found zone $ZONE with id $ZONE_ID"
+		_running2 " - Found zone $ZONE with id $ZONE_ID"
 
 		RECORD_CREATE_OUTPUT="ID\tZone Name\tName\tType\tContent\tProxiable\tProxied\tTTL"
 		RECORD_CREATE_OUTPUT+="\n--\t---------\t----\t----\t-------\t---------\t-------\t---\n"
 
 		case "$type" in
 		MX)
-			_loading2 " -- Creating MX record: $name $content $ttl $prio"
+			_running2 " -- Creating MX record: $name $content $ttl $prio"
 			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":\"$ttl\",\"priority\":$prio}")
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'			
 			;;
@@ -297,7 +350,7 @@ add)
 			then
 				ttl=${1:-1}
 			fi
-			_loading2 " -- Creating LOC record: $name $content $ttl"
+			_running2 " -- Creating LOC record: $name $content $ttl"
 			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}")
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
@@ -322,12 +375,12 @@ add)
 				}"
 			;;
 		TXT)
-			_loading2 " -- Creating TXT record: $name $content $ttl"
+			_running2 " -- Creating TXT record: $name $content $ttl"
 			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		A)
-			_loading2 " -- Creating A record: $name $content $ttl $proxied"
+			_running2 " -- Creating A record: $name $content $ttl $proxied"
 			cf_api POST /client/v4/zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
 			if [[ $? == 0 ]]; then
 				_success "Record created"
@@ -338,13 +391,13 @@ add)
 			fi
 			;;
 		CNAME)
-			_loading2 " -- Creating CNAME record: $name $content $ttl $proxied"
+			_running2 " -- Creating CNAME record: $name $content $ttl $proxied"
 			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 
 		*)  
-			_loading2 " -- Creating record: $name $content $ttl"
+			_running2 " -- Creating record: $name $content $ttl"
 			#  ,id,zone_name,name,type,content,proxiable,proxied,ttl			
 			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
@@ -382,49 +435,58 @@ add)
 
 	zone)		
 		_pre_flight_check CF_
-		# Usage: cloudflare add zone <zone> [account-id] 
+		# Usage:
+		#   cloudflare add zone <zone> [account-id]
+		#   cloudflare -f zones.txt add zone <account-id>
+		#   cloudflare -f zones.txt --account-id <account-id> add zone
 		DOMAIN="$1"
 		ACCOUNT_ID="$2"
-		if [ -z "$DOMAIN" ]; then
-			_die "Usage: cloudflare add zone <zone> [account-id]"					
+		
+		# Prefer explicit --account-id over positional
+		if [[ -n "$CLI_ACCOUNT_ID" ]]; then
+			ACCOUNT_ID="$CLI_ACCOUNT_ID"
 		fi
 
-		# Check if zone already exists
-		_loading2 "Checking if zone $DOMAIN already exists"		
-		ZONE_ID=$(_cf_zone_id "$DOMAIN")			
-		if [ $? ]; then
-			_loading2 "Zone $DOMAIN does not exist"
-		else
+		# Bulk mode: if zones were specified via -z/-f and no domain is given
+		# Also support: cloudflare -f zones.txt add zone <account-id>
+		if [[ ${#ZONES_TO_PROCESS[@]} -gt 0 && ( -z "$DOMAIN" || ( ${#DOMAIN} -eq 32 && "$DOMAIN" != *.* ) ) ]]; then
+			# If DOMAIN looks like an account id and no explicit account id given, treat it as account id
+			if [[ -z "$ACCOUNT_ID" && -n "$DOMAIN" && ${#DOMAIN} -eq 32 && "$DOMAIN" != *.* ]]; then
+				ACCOUNT_ID="$DOMAIN"
+				DOMAIN=""
+			fi
+
+			_running2 "Creating ${#ZONES_TO_PROCESS[@]} zone(s)${ACCOUNT_ID:+ under account $ACCOUNT_ID}"
+			echo -e "Zone\tID\tName Servers"
+			echo -e "----\t--\t------------"
+			_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+			return $?
+		fi
+
+		# Single-zone mode
+		if [[ -z "$DOMAIN" ]]; then
+			_die "Usage: cloudflare add zone <zone> [account-id]"
+		fi
+
+		_running2 "Checking if zone $DOMAIN already exists"
+		ZONE_ID=$(_cf_zone_id "$DOMAIN")
+		if [[ -n "$ZONE_ID" ]]; then
 			_error "Zone $DOMAIN already exists with ID $ZONE_ID"
-			exit
+			exit 1
 		fi
 
-
-		# -- Check if account id is provided
-		if [ -n "$ACCOUNT_ID" ]; then
-			_loading2 "Account ID provided: $ACCOUNT_ID"
-			_debug "Account ID provided: $ACCOUNT_ID"
-			JSON="{\"account\":{\"id\":\"$ACCOUNT_ID\"},\"name\":\"$DOMAIN\",\"jump_start\":true}"
-		else
-			_loading2 "No Account ID provided, creating in default account"
-			_debug "No Account ID provided"
-			JSON="{\"name\":\"$DOMAIN\",\"jump_start\":true}"
-		fi
-
-		# -- Create a new zone
-		CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers)
+		# -- Create a new zone (and show assigned nameservers)
+		CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "{\"${ACCOUNT_ID:+account\":{\"id\":\"$ACCOUNT_ID\"},\"}name\":\"$DOMAIN\",\"jump_start\":true}" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers)
 		CREATE_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\n"
 		CREATE_ZONE_OUTPUT+="----\t------\t----\t--\t------------\n"
 		CREATE_ZONE_OUTPUT+=$CREATE_ZONE_OUTPUT_CMD
-		
-		
-		_success "Zone created" 
+
+		_success "Zone created"
 		echo -e "$CREATE_ZONE_OUTPUT" | column -t -s $'\t'
 		echo ""
 
 		_notice "Please make sure to update your name servers to the following:"
-		# Get name servers
-		echo "$CREATE_ZONE_OUTPUT_CMD" | awk '{print $5}'
+		echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $5}' | tr ', ' '\n' | sed '/^$/d' | sed 's/^/  - /'
 
 		;;
 	*)
@@ -517,7 +579,7 @@ delete)
 			_die "No zone found for $DOMAIN"
 		fi
 
-		_loading2 "Deleting zone $DOMAIN with ID $ZONE_ID"	
+		_running2 "Deleting zone $DOMAIN with ID $ZONE_ID"	
 		# Confirm deletion
 		echo ""
 		echo "===================================================================="
@@ -529,7 +591,7 @@ delete)
 		echo "===================================================================="
 		echo ""
 
-		_loading2 "Are you sure you want to delete zone $DOMAIN with ID $ZONE_ID?"
+		_running2 "Are you sure you want to delete zone $DOMAIN with ID $ZONE_ID?"
 		read -r -p "Continue? [y/N] " response
 		case "$response" in
 		[yY][eE][sS]|[yY]) 
@@ -539,7 +601,7 @@ delete)
 			_die "Aborting"
 			;;
 		esac
-		_loading2 "Deleting zone $DOMAIN with ID $ZONE_ID"
+		_running2 "Deleting zone $DOMAIN with ID $ZONE_ID"
 		call_cf_v4 DELETE /zones/$ZONE_ID
 		;;
 
@@ -623,59 +685,35 @@ change|set)
 
 	record)
 		_pre_flight_check CF_
-		[ -z "$1" ] && { help change; _die "Missing arguments"; }
-		
-		prm1=$1
-		prm2=$2
-		
-		# Check if using direct ID mode: <zone-name|zone-id> <record-id> <setting> <value>...
-		if [ ${#prm2} = 32 ] && is_hex "$prm2"; then
-			shift 2  # consume prm1 and prm2
-			
-			# Determine zone_id
-			if is_hex "$prm1"; then
-				zone_id=$prm1
-			else
-				zone_id=$(_cf_zone_id "$prm1")
-				[[ -z "$zone_id" ]] && _die "No zone found for \`$prm1'"
-			fi
-			record_id=$prm2
-			
-			# Fetch record data using direct API call
-			_cf_get_record "$zone_id" "$record_id"
-			[[ $? -ne 0 ]] && _die "Failed to fetch record \`$record_id'"
-			
-		else
-			# Name-based mode: use findout_record
-			record_name=$1
-			shift
-			record_type=''
-			first_match=0
-			record_oldcontent=''
+	[ -z "$1" ] && { help change; _die "Missing arguments"; }
+		record_name=$1
+		shift
+		record_type=''
+		first_match=0
+		record_oldcontent=''
 
-			while [ -n "$1" ]
-			do
-				case "$1" in
-				first)	first_match=1;;
-				type)	shift; record_type=${1^^};;
-				oldcontent)	shift; record_oldcontent=$1;;
-				*)		break;;
-				esac
-				shift
-			done
-
-			[ -z "$1" ] && { help change; _die "Missing arguments"; }
-
-			findout_record "$record_name" "$record_type" "$first_match" "$record_oldcontent"
-			e=$?
-			case $e in
-			0)	true;;
-			2)	_die "No suitable DNS zone found for \`$record_name'";;
-			3)	_die "DNS record \`$record_name' not found";;
-			4)	_die "Ambiguous record name: \`$record_name'";;
-			*)	_die "Internal error";;
+		while [ -n "$1" ]
+		do
+			case "$1" in
+			first)	first_match=1;;
+			type)	shift; record_type=${1^^};;
+			oldcontent)	shift; record_oldcontent=$1;;
+			*)		break;;
 			esac
-		fi
+			shift
+		done
+
+		[ -z "$1" ] && { help change; _die "Missing arguments"; }		
+
+		findout_record "$record_name" "$record_type" "$first_match" "$record_oldcontent"
+		e=$?
+		case $e in
+		0)	true;;
+		2)	_die "No suitable DNS zone found for \`$record_name'";;
+		3)	_die "DNS record \`$record_name' not found";;
+		4)	_die "Ambiguous record name: \`$record_name'";;
+		*)	_die "Internal error";;
+		esac
 
 		record_content_esc=${record_content//\"/\\\"}
 		old_data="\"name\":\"$record_name\",\"type\":\"$record_type\",\"ttl\":$record_ttl,\"content\":\"$record_content_esc\""
@@ -690,13 +728,6 @@ change|set)
 			[ "$setting" = newtype -o "$setting" = new_type ] && setting="type"
 			[ "$setting" = newname -o "$setting" = new_name ] && setting="name"
 			[ "$setting" = newcontent ] && setting="content"
-			
-			# Validate setting is a known DNS record field
-			case "$setting" in
-				content|ttl|name|type|proxied|priority|comment) ;;
-				*) _die "Unknown record setting: \`$setting'. Valid settings: content, ttl, name, type, proxied, priority, comment";;
-			esac
-			
 			if [ "$setting" = proxied ]; then
 				value=${value,,}
 				[ "$value" = on -o "$value" = 1 ] && value=true
@@ -713,13 +744,9 @@ change|set)
 			new_data="$new_data${new_data:+,}\"$setting\":$value_escq"
 		done
 
-		_loading2 "Updating record $record_name ($record_id)"
-		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}" -- \
-			%"  ID: %s$NL  Name: %s$NL  Type: %s$NL  Content: %s$NL  TTL: %s$NL  Proxied: %s$NL" ,id,name,type,content,ttl,proxied
-		if [[ $? -eq 0 ]]; then
-			_success "Record updated successfully"
-		else
-			_error "Failed to update record"
+		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}"
+		if [[ $? != 1 ]]; then
+			echo "$CURL_OUTPUT_GLOBAL"	
 		fi
 		;;
 	*)
@@ -806,11 +833,11 @@ template)
 	case "$CMD" in
 	# -- list templates in /template
 	list)
-		_loading "Listing templates"
+		_running "Listing templates"
 		ls -1 templates
 		;;
 	apply)
-		_loading2 "Applying template $TEMPLATE_NAME"		
+		_running2 "Applying template $TEMPLATE_NAME"		
 		# -- Check for template name
 		if [ -z "$TEMPLATE_NAME" ]; then
 			help template
@@ -827,7 +854,7 @@ template)
 		fi
 
 		# Parse command line options
-		_loading2 "Parsing command line options"
+		_running2 "Parsing command line options"
 		declare -A ARG_VARIABLES
 		declare -a REQUIRED_VARIABLES
 
@@ -859,35 +886,35 @@ template)
 		}
 
 		# Parse the template for variable definitions and commands
-		_loading2 "Parsing template for variables"
+		_running2 "Parsing template for variables"
 		while IFS= read -r line; do
 		if [[ "$line" =~ ^#\ *(.*)=(.*) ]]; then			
 			key="${BASH_REMATCH[1]}"
 			value="${BASH_REMATCH[2]}"
 			REQUIRED_VARIABLES+=("$key")
-			_loading3 " - Found template var: $key=${ARG_VARIABLES[$key]}"			
+			_running3 " - Found template var: $key=${ARG_VARIABLES[$key]}"			
 		fi
 		done < "$TEMPLATE_FILE"
 
 		# Check if all required variables are defined
-		_loading2 "Checking for required variables"
+		_running2 "Checking for required variables"
 		for var in "${REQUIRED_VARIABLES[@]}"; do
 			if [ -z "${ARG_VARIABLES[$var]}" ]; then
 				_error "Error: Required variable '$var' is not defined."
 				exit 1
 			else
-				_loading3 " - Variable defined $var: ${ARG_VARIABLES[$var]}"
+				_running3 " - Variable defined $var: ${ARG_VARIABLES[$var]}"
 			fi
 		done
 
 		# Apply variables to the template content
-		_loading2 "Applying variables to template"
+		_running2 "Applying variables to template"
 		# Remove comments
 		TEMPLATE_CONTENT=$(sed '/^#/d' "$TEMPLATE_FILE")
 		FINAL_COMMAND=$(apply_template "$TEMPLATE_CONTENT")
 
 		# Execute the commands
-		_loading2 "Final command:"
+		_running2 "Final command:"
 		echo "$FINAL_COMMAND"
 		echo ""
 		echo -n "Proceed with the final command? [y/N] "
@@ -900,13 +927,13 @@ template)
 			while IFS= read -r line; do
 				# Check for blank line and skip
 				[ -z "$line" ] && continue
-				_loading3 "============= Running: $line"
+				_running3 "============= Running: $line"
 				[[ DEBUG -eq 1 ]] && echo "DEBUG: $line"
 				[[ DEBUG -eq 1 ]] && set -x
 				CMD_RUN=("$0" "$line")
 				eval "${CMD_RUN[@]}"
 				[[ DEBUG -eq 1 ]] && set +x
-				_loading3 "============= Done"
+				_running3 "============= Done"
 			done <<< "$FINAL_COMMAND"
 			
 		fi
@@ -930,19 +957,19 @@ search)
 	zone)
 		_pre_flight_check CF_
 		[ -z "$1" ] && { help search; _die "Missing zone name"; }
-		_loading2 "Searching for zone $1"
+		_running2 "Searching for zone $1"
 		zone_search "$1"
 		;;
 	zones)
 		_pre_flight_check CF_
 		[ -z "$1" ] && { help search; _die "Missing search term"; }
-		_loading2 "Searching for zones with term $1"
+		_running2 "Searching for zones with term $1"
 		zone_search "$1"
 		;;
 	record)
 		_pre_flight_check CF_
 		[ -z "$1" ] && { help search; _die "Missing record name"; }
-		_loading2 "Searching for record $1"
+		_running2 "Searching for record $1"
 		_cf_get_record_by_name "$1"
 		;;
 	*)
@@ -960,7 +987,7 @@ account)
 	case "$CMD" in
 	list)
 		_pre_flight_check CF_
-		_loading "Getting list of accounts"
+		_running "Getting list of accounts"
 		ACCOUNT_LIST_OUTPUT="Name\tID\tType\tCreated Date\n"
 		ACCOUNT_LIST_OUTPUT+=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
 		echo -e "$ACCOUNT_LIST_OUTPUT" | column -t -s $'\t'
@@ -970,14 +997,14 @@ account)
 		_pre_flight_check CF_
 		ACCOUNT_ID=$1
 		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
-		_loading "Getting account details for $1"
+		_running "Getting account details for $1"
 		call_cf_v4 GET /accounts/$1
 		;;
 	zones)
 		_pre_flight_check CF_
 		ACCOUNT_ID=$1
 		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
-		_loading "Getting zones for account $ACCOUNT_ID"
+		_running "Getting zones for account $ACCOUNT_ID"
 		ACCOUNT_ZONE_LIST="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		ACCOUNT_ZONE_LIST+="----\t------\t----\t--\t------------\t-------------------\n"		
 		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id=$ACCOUNT_ID -- .result %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
@@ -1044,11 +1071,11 @@ proxy)
 
 	RECORD_NAME=$(_validate_record_name "$RECORD_INPUT") || _die "Invalid record name: $RECORD_INPUT"
 
-	_loading "Deriving zone for: $RECORD_NAME"
+	_running "Deriving zone for: $RECORD_NAME"
 	ZONE_DATA=$(_cf_derive_zone_from_record "$RECORD_NAME") || _die "Unable to find managed zone for $RECORD_NAME"
 	IFS='|' read -r DERIVED_ZONE DERIVED_ZONE_ID <<< "$ZONE_DATA"
 
-	_loading2 "Zone identified: $DERIVED_ZONE ($DERIVED_ZONE_ID)"
+	_running2 "Zone identified: $DERIVED_ZONE ($DERIVED_ZONE_ID)"
 	RECORD_DATA=$(_cf_find_record_by_name "$DERIVED_ZONE_ID" "$RECORD_NAME") || _die "No eligible A/CNAME records found for $RECORD_NAME"
 	IFS='|' read -r RECORD_ID RECORD_TYPE RECORD_FQDN RECORD_CONTENT RECORD_TTL RECORD_PROXIED <<< "$RECORD_DATA"
 
@@ -1065,18 +1092,18 @@ proxy)
 		action="proxy"
 	fi
 
-	_loading2 "Record: $RECORD_FQDN ($RECORD_TYPE) -> currently proxied=$RECORD_PROXIED"
+	_running2 "Record: $RECORD_FQDN ($RECORD_TYPE) -> currently proxied=$RECORD_PROXIED"
 	read -r -p "Do you want to $action this record? [y/N] " ANSWER
 	case "$ANSWER" in
 		[yY]|[yY][eE][sS])
-			_loading2 "Updating record to proxied=$target_proxied"
+			_running2 "Updating record to proxied=$target_proxied"
 			UPDATE_BODY='{"proxied":'"$target_proxied"'}'
 			cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
 			NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
 			_success "Record $RECORD_FQDN proxied=$NEW_STATE"
 			;;
 		*)
-			_loading2 "Aborted by user; no changes made."
+			_running2 "Aborted by user; no changes made."
 			;;
 	esac
 	;;
@@ -1093,7 +1120,7 @@ check)
 		_pre_flight_check CF_
 		_cf_zone_exists "$DOMAIN"
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
-		_loading2 "Found zone id $ZONE_ID for $DOMAIN"
+		_running2 "Found zone id $ZONE_ID for $DOMAIN"
 		call_cf_v4 PUT /zones/$ZONE_ID/activation_check
 		;;
 	*)
@@ -1109,7 +1136,7 @@ check)
 # TODO: Replace json_decode with jq for better reliability and performance
 # This command uses the deprecated json_decode function. Consider rewriting to use jq instead.
 json)	
-	_loading "Reading STDIN data and sending to json_decode with args: ${@}"
+	_running "Reading STDIN data and sending to json_decode with args: ${@}"
 	JSON_FILE="$1"
 	shift
 	cat $JSON_FILE | json_decode "${@}"	
@@ -1135,7 +1162,11 @@ functions)
 	_list_core_functions
 	;;
 help)
-	help usage
+	if [[ -n "${1:-}" ]]; then
+		help "$@"
+	else
+		help full
+	fi
 	;;
 *)
 	help usage

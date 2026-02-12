@@ -51,6 +51,21 @@ function _list_core_functions () {
 # -- Cloudflare API Functions
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Compatibility: some scripts use _running/_running2/_running3 message helpers.
+# Newer cf-inc.sh variants expose _loading/_loading2/_loading3 instead.
+# Define aliases when needed.
+# -----------------------------------------------------------------------------
+if ! declare -F _running >/dev/null 2>&1; then
+    _running() { _loading "$@"; }
+fi
+if ! declare -F _running2 >/dev/null 2>&1; then
+    _running2() { _loading2 "$@"; }
+fi
+if ! declare -F _running3 >/dev/null 2>&1; then
+    _running3() { _loading3 "$@"; }
+fi
+
 # =====================================
 # -- cf_api <$REQUEST> <$API_PATH> [--paginate] [--all-pages] "${EXTRA[@]}"
 # -- Run cf_api request and return output via $API_OUTPUT

@@ -19,10 +19,6 @@ CBLUEBG=$(tput setab 4)
 CCYAN=$(tput setaf 6)
 CGRAY=$(tput setaf 7)
 CDARKGRAY=$(tput setaf 8)
-CBLACK=$(tput setaf 0)
-CWHITE=$(tput setaf 15)
-CYELLOWBG=$(tput setab 3)
-CGRAYBG=$(tput setab 7)
 
 # =============================================================================
 # -- Core Functions
@@ -35,13 +31,24 @@ CGRAYBG=$(tput setab 7)
 _error () { [[ $QUIET == "0" ]] && echo -e "${CRED}** ERROR ** - ${*} ${NC}" >&2; } 
 _warning () { [[ $QUIET == "0" ]] && echo -e "${CYELLOW}** WARNING ** - ${*} ${NC}" >&2; }
 _success () { [[ $QUIET == "0" ]] && echo -e "${CGREEN}** SUCCESS ** - ${*} ${NC}"; }
-_loading () { [[ $QUIET == "0" ]] && echo -e "${CYELLOWBG}${CBLACK} * ${*}${NC}"; }
-_loading2 () { [[ $QUIET == "0" ]] && echo -e "${CGRAYBG}${CBLACK} ** ${*}${NC}"; }
-_loading3 () { [[ $QUIET == "0" ]] && echo -e " *** ${CGRAY}${*}${NC}"; }
+_running () { [[ $QUIET == "0" ]] && echo -e "${CBLUEBG}${*}${NC}"; }
+_running2 () { [[ $QUIET == "0" ]] && echo -e " * ${CGRAY}${*}${NC}"; }
+_running3 () { [[ $QUIET == "0" ]] && echo -e " ** ${CDARKGRAY}${*}${NC}"; }
 _creating () { [[ $QUIET == "0" ]] && echo -e "${CGRAY}${*}${NC}"; }
 _separator () { [[ $QUIET == "0" ]] && echo -e "${CYELLOWBG}****************${NC}"; }
 _dryrun () { [[ $QUIET == "0" ]] && echo -e "${CCYAN}** DRYRUN: ${*$}${NC}"; }
 _quiet () { [[ $QUIET == "1" ]] && echo -e "${*}"; }
+
+# Compatibility aliases: some scripts use _loading/_loading2/_loading3.
+if ! declare -F _loading >/dev/null 2>&1; then
+    _loading() { _running "$@"; }
+fi
+if ! declare -F _loading2 >/dev/null 2>&1; then
+    _loading2() { _running2 "$@"; }
+fi
+if ! declare -F _loading3 >/dev/null 2>&1; then
+    _loading3() { _running3 "$@"; }
+fi
 
 # =====================================
 # -- debug - ( $MESSAGE, $LEVEL)
@@ -169,12 +176,12 @@ function _check_cloudflare_creds_old () {
 
 
     if [[ -n $API_TOKEN ]]; then
-        _loading "Found \$API_TOKEN via CLI using for authentication/."
+        _running "Found \$API_TOKEN via CLI using for authentication/."
         API_TOKEN=$CF_SPC_TOKEN
     elif [[ -n $API_ACCOUNT ]]; then
-        _loading "Found \$API_ACCOUNT via CLI using as authentication."
+        _running "Found \$API_ACCOUNT via CLI using as authentication."
         if [[ -n $API_APIKEY ]]; then
-            _loading "Found \$API_APIKEY via CLI using as authentication."
+            _running "Found \$API_APIKEY via CLI using as authentication."
         else
             _error "Found API Account via CLI, but no API Key found, use -ak...exiting"
             exit 1
@@ -265,13 +272,6 @@ function _check_cloudflare_creds () {
     local -a available_profiles=()
     local -a profile_descriptions=()
     
-    # Check if .cloudflare file exists and source it first
-    if [[ -f "$CONFIG" ]]; then
-        _debug "Processing .cloudflare file: $CONFIG"
-        # shellcheck source=/dev/null
-        source "$CONFIG"
-    fi
-    
     # If API_PROFILE is explicitly set, try to use it first
     if [[ -n ${API_PROFILE:-} ]]; then
         local PROFILE_UPPER
@@ -318,13 +318,17 @@ function _check_cloudflare_creds () {
         exit 1
     fi
 
-    # Check if .cloudflare file exists (for interactive mode)
+    # Check if .cloudflare file exists
     if [[ ! -f "$CONFIG" ]]; then
         _error "No .cloudflare file found at $CONFIG"
         exit 1
     fi
     
-    # Config already sourced above if file exists
+    _debug "Processing .cloudflare file: $CONFIG"
+    
+    # Source the config file so we can inspect variables
+    # shellcheck source=/dev/null
+    source "$CONFIG"
     
     # Check for default CF_ACCOUNT and CF_KEY
     if [[ -n ${CF_ACCOUNT:-} ]]; then
@@ -608,6 +612,7 @@ function _set_credentials_from_profile() {
             local profile_name="${profile%_TOKEN}"
             local token_var="CF_TOKEN_${profile_name}"
             _debug "Token profile: profile_name=${profile_name}, token_var=${token_var}"
+            _debug "Token variable exists: [${!token_var}]"
             API_TOKEN="${!token_var}"
             API_METHOD="token"
             _debug "Set credentials: profile=${profile_name}, API_TOKEN=$(_mask_sensitive "${API_TOKEN}"), API_METHOD=${API_METHOD}"
