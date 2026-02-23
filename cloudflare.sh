@@ -70,6 +70,7 @@ Commands:
       			invalidate <url>
 
    security   - Change security settings
+                <zone> list
                 <zone> security_level [under_attack | high | medium | low | essentially_off]
                 <zone> challenge_ttl [300 | 900 | 1800 | ...]
                 <zone> browser_integrity_check [on | off]
@@ -170,7 +171,11 @@ ${HELP_VERSION}"
 HELP_SECURITY=\
 "${HELP_CMDS}
 
-Usage: cloudflare security <zone> <setting> <value>
+Usage: cloudflare security <zone> list
+       cloudflare security <zone> <setting> <value>
+
+    Commands:
+        list                  Show current values of all security settings
 
     Settings and allowed values:
 
@@ -181,6 +186,7 @@ Usage: cloudflare security <zone> <setting> <value>
         always_use_https      [on | off]
 
     Examples:
+        cloudflare security example.com list
         cloudflare security example.com security_level high
         cloudflare security example.com challenge_ttl 3600
         cloudflare security example.com browser_integrity_check on
@@ -1397,9 +1403,8 @@ invalidate)
 # -- security command
 # ---------------------
 security)
-	[ -z "$1" ] && { HELP security; _die "Usage: cloudflare security <zone> <setting> <value>" 1; }
-	[ -z "$2" ] && { HELP security; _die "Usage: cloudflare security <zone> <setting> <value>" 1; }
-	[ -z "$3" ] && { HELP security; _die "Usage: cloudflare security <zone> <setting> <value>" 1; }
+	[ -z "$1" ] && { HELP security; _die "Usage: cloudflare security <zone> list|<setting> [<value>]" 1; }
+	[ -z "$2" ] && { HELP security; _die "Usage: cloudflare security <zone> list|<setting> [<value>]" 1; }
 
 	if is_hex "$1"
 	then
@@ -1408,47 +1413,57 @@ security)
 		get_zone_id "$1"
 	fi
 	security_setting=$2
-	security_value=$3
 
 	case "$security_setting" in
-	security_level)
-		case "$security_value" in
-		under_attack|high|medium|low|essentially_off) true;;
-		*) _die "Invalid value for security_level. Allowed: under_attack, high, medium, low, essentially_off" 1;;
-		esac
+	list)
+		call_cf_v4 GET /zones/$zone_id/settings -- .result %"%-30s %s$NL" ,id,value | \
+			grep -E "^(security_level|challenge_ttl|browser_integrity_check|always_use_https)"
 		;;
-	challenge_ttl)
-		case "$security_value" in
-		300|900|1800|2700|3600|7200|10800|14400|28800|57600|86400|604800|2592000|31536000) true;;
-		*) _die "Invalid value for challenge_ttl. Allowed: 300, 900, 1800, 2700, 3600, 7200, 10800, 14400, 28800, 57600, 86400, 604800, 2592000, 31536000" 1;;
+	security_level|challenge_ttl|browser_integrity_check|always_use_https)
+		security_value=$3
+		[ -z "$security_value" ] && { HELP security; _die "Usage: cloudflare security <zone> $security_setting <value>" 1; }
+
+		case "$security_setting" in
+		security_level)
+			case "$security_value" in
+			under_attack|high|medium|low|essentially_off) true;;
+			*) _die "Invalid value for security_level. Allowed: under_attack, high, medium, low, essentially_off" 1;;
+			esac
+			;;
+		challenge_ttl)
+			case "$security_value" in
+			300|900|1800|2700|3600|7200|10800|14400|28800|57600|86400|604800|2592000|31536000) true;;
+			*) _die "Invalid value for challenge_ttl. Allowed: 300, 900, 1800, 2700, 3600, 7200, 10800, 14400, 28800, 57600, 86400, 604800, 2592000, 31536000" 1;;
+			esac
+			;;
+		browser_integrity_check)
+			case "$security_value" in
+			on|off) true;;
+			*) _die "Invalid value for browser_integrity_check. Allowed: on, off" 1;;
+			esac
+			;;
+		always_use_https)
+			case "$security_value" in
+			on|off) true;;
+			*) _die "Invalid value for always_use_https. Allowed: on, off" 1;;
+			esac
+			;;
 		esac
-		;;
-	browser_integrity_check)
-		case "$security_value" in
-		on|off) true;;
-		*) _die "Invalid value for browser_integrity_check. Allowed: on, off" 1;;
-		esac
-		;;
-	always_use_https)
-		case "$security_value" in
-		on|off) true;;
-		*) _die "Invalid value for always_use_https. Allowed: on, off" 1;;
-		esac
+
+		if is_integer "$security_value"
+		then
+			setting_value_json=$security_value
+		else
+			setting_value_json="\"$security_value\""
+		fi
+
+		call_cf_v4 PATCH /zones/$zone_id/settings/$security_setting "{\"value\":$setting_value_json}"
 		;;
 	*)
 		HELP security
 		_die "Unknown security setting: $security_setting. Allowed: security_level, challenge_ttl, browser_integrity_check, always_use_https" 1
 		;;
 	esac
-
-	if is_integer "$security_value"
-	then
-		setting_value_json=$security_value
-	else
-		setting_value_json="\"$security_value\""
-	fi
-
-	call_cf_v4 PATCH /zones/$zone_id/settings/$security_setting "{\"value\":$setting_value_json}"
 	;;
 
 # ---------------
