@@ -1,0 +1,26 @@
+{
+    "result": [
+        {
+            "id": "09m348928m58m4343n754n37m34m34m74jn",
+            "name": "user@domain Account",
+            "type": "standard",
+            "settings": {
+                "enforce_twofactor": false,
+                "api_access_enabled": null,
+                "access_approval_expiry": null,
+                "use_account_custom_ns_by_default": false,
+                "default_nameservers": "cloudflare.standard",
+                "abuse_contact_email": null
+            },
+            "legacy_flags": {
+                "enterprise_zone_quota": {
+                    "maximum": 0,
+                    "current": 0,
+                    "available": 0
+                }
+            },
+            "created_on": "2024-04-22T15:35:43.460268Z"
+        }
+    ],
+    "result_info":{"page":1,"per_page":20,"total_pages":1,"count":5,"total_count":5},"success":true,"errors":[],"messages":[]
+}

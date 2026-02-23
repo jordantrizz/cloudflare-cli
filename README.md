@@ -1,10 +1,7 @@
-## DESCRIPTION
+# cloudflare-cli
+CLI utility managing CloudFlare services highly focused on DNS using CloudFlare API
 
-CLI utility managing CloudFlare services - highly focused on DNS - 
-using CloudFlare API
-
-
-## SYNOPSIS
+# Usage
 
 ```
 Usage: cloudflare [Options] <command> <parameters>
@@ -14,14 +11,98 @@ Options:
  --quiet, -q      Less verbose
  -E <email>
  -T <api_token>
+ -p, --profile    Use credentials profile NAME from ~/.cloudflare
+
+Multi-Zone Options:
+ -z, --zone       Specify zone (can be repeated for multiple zones)
+ -f, --zones-file Read zones from file (one per line, # comments)
+ --continue-on-error  Continue processing despite individual zone failures
+
 Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
 Enter "cloudflare help" to list available commands.
 ```
 
+# Multi-Zone Operations
 
-## COMMAND REFERENCE
+You can apply commands to multiple zones at once using the `-z` and `-f` options.
+
+## Specify zones on command line
+```bash
+# Clear cache on multiple zones
+cloudflare -z example.com -z example.org clear cache
+
+# Show records for multiple zones  
+cloudflare -z site1.com -z site2.com show records
+```
+
+## Use a zones file
+Create a file with one zone per line (comments with `#` are supported):
+```
+# zones.txt
+example.com
+example.org
+# staging.example.com  (commented out)
+production.example.net
+```
+
+Then use it:
+```bash
+cloudflare -f zones.txt clear cache
+```
+
+## Bulk create zones under an account
+If you want to create many zones under a specific account, combine `-f` (or repeated `-z`) with `add zone` and an account id:
+
+```bash
+# Create all zones from zones.txt under the given account id
+cloudflare -f zones.txt --account-id <account_id> add zone
+
+# Alternative form (account id as the parameter after `add zone`)
+cloudflare -f zones.txt add zone <account_id>
+```
+
+The output includes the assigned Cloudflare nameservers per zone (these are the nameservers you update at your registrar).
+
+## Combine both methods
+```bash
+cloudflare -z extra-zone.com -f zones.txt clear cache
+```
+
+## Continue on errors
+By default, processing stops on the first error. Use `--continue-on-error` to process all zones:
+```bash
+cloudflare -f zones.txt --continue-on-error clear cache
+```
+
+After processing, a summary report is displayed and a log file is created in `$TMPDIR`.
+
+# Config
+## Config Global API
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+   ```
+   CF_ACCOUNT=<your_email>
+   CF_KEY=<your_api_token>
+   ```
+## Config Token
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+3. ```
+   CF_TOKEN=<your_api_token>
+   ```
+## Config Profiles
+You can create multiple profiles to manage different CloudFlare accounts or configurations. Each profile can have its own email and API token.
+1. Create a file in $HOME/.cloudflare
+2. Add the following lines to the file:
+3. ```
+   CF_ACCOUNT_<PROFILE>=<your_email>
+   CF_KEY_<PROFILE>=<your_api_token>
+   CF_TOKEN_<PROFILE>=<your_api_token>
+   ```
+
+# Commands
 
 ```
 $ cloudflare help
