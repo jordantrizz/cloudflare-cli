@@ -1078,7 +1078,7 @@ findout_record() {
 		zone=${zname_zid%%:*}
 		zone=${zone,,}
 		zid=${zname_zid##*:}
-		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
+		if [[ "$record_name" =~ ^((.*)\.)$zone$ ]] || [[ "$record_name" == "$zone" ]]; then
 			# TODO why is subdomain never used?
 			subdomain=${BASH_REMATCH[2]}
 			zone_id=$zid
