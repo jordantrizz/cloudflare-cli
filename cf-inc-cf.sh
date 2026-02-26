@@ -844,7 +844,8 @@ _jq_pfmt_field() {
 	local f="$1"
 	# Apply PHP str_replace(",,", ",") - ,, was used as escaped comma
 	f="${f//,,/,}"
-	if [[ "${f:0:1}" == "?" ]]; then
+	local first="${f:0:1}"
+	if [[ "$first" == "?" ]]; then
 		# Ternary: ?condition?valueIfTrue?valueIfFalse
 		local rest="${f:1}"
 		local fcond="${rest%%\?*}"
@@ -855,13 +856,13 @@ _jq_pfmt_field() {
 		jq_true=$(_jq_pfmt_field "$ftrue")
 		jq_false=$(_jq_pfmt_field "$ffalse")
 		echo "(if (.${fcond} // false) then ${jq_true} else ${jq_false} end)"
-	elif [[ "${f:0:1}" == '"' ]]; then
+	elif [[ "$first" == '"' ]]; then
 		# Literal string, possibly with PHP $var interpolation
 		local inner="${f:1:-1}"
 		local jq_str
 		jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
 		echo "\"${jq_str}\""
-	elif [[ "${f:0:1}" == "<" ]]; then
+	elif [[ "$first" == "<" ]]; then
 		# PHP eval expression
 		local code="${f:1}"
 		if [[ "${code:0:1}" == '"' ]]; then
@@ -921,8 +922,7 @@ jq_decode() {
 	local page total_pages
 	page=$(echo "$input" | jq -r '.result_info.page // 0' 2>/dev/null)
 	total_pages=$(echo "$input" | jq -r '.result_info.total_pages // 0' 2>/dev/null)
-	if [[ "$page" =~ ^[0-9]+$ && "$total_pages" =~ ^[0-9]+$ ]] && \
-	   [[ "$page" -gt 0 && "$page" -lt "$total_pages" ]] 2>/dev/null; then
+	if [[ "$page" -gt 0 && "$page" -lt "$total_pages" ]] 2>/dev/null; then
 		echo "!has_more"
 	fi
 
@@ -944,13 +944,13 @@ jq_decode() {
 			# Field list: ,name,status,id
 			mode="fields"
 			local fields_str="${arg:1}"
-			# Protect ,, (escaped comma) during split
-			fields_str="${fields_str//,,/__DC__}"
+			# Protect ,, (escaped comma) during split, restore after
+			fields_str="${fields_str//,,/__ESCAPED_COMMA__}"
 			IFS=',' read -ra raw_fields <<< "$fields_str"
 			fields=()
 			local f
 			for f in "${raw_fields[@]}"; do
-				f="${f//__DC__/,,}"
+				f="${f//__ESCAPED_COMMA__/,,}"
 				[[ -n "$f" ]] && fields+=("$f")
 			done
 		elif [[ "${arg:0:1}" == "&" ]]; then
