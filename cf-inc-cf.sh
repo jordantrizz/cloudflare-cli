@@ -33,6 +33,7 @@ HELP_OPTIONS="Options:
 	--debug, -D            Display API debugging info
 	--debug-curl, -DC      Display API debugging info and curl output
 	--quiet, -q            Less verbose
+	-y, --yes, --force     Skip confirmation prompts (e.g. when an existing record is found)
 	-E <email>             Cloudflare Email
 	-T <api_token>         Cloudflare API Token
 	-p, --profile NAME     Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
@@ -419,6 +420,11 @@ Options
     [protocol]  tcp, udp, tls
     [weight]    relative weight for records with the same priority
     [port]      layer-4 port number
+
+    -y, --yes, --force   Skip the prompt when an existing record is found.
+
+Note: If a record with the same name and type already exists, you will be prompted
+      to confirm before creating a duplicate. Use -y/--force to skip this prompt.
 
 ${HELP_VERSION}
 "
@@ -1134,6 +1140,46 @@ findout_record() {
 }
 
 
+# ===============================================
+# -- _cf_check_record_exists $ZONE_ID $NAME $TYPE
+# -- Check if a DNS record with the given name and type already exists in the zone.
+# -- Outputs existing records to stdout when found.
+# -- Returns: 0 if one or more records exist, 1 if none found
+# -- Arguments: $1 - zone_id, $2 - record name, $3 - record type
+# ===============================================
+function _cf_check_record_exists () {
+	local ZONE_ID="$1"
+	local RECORD_NAME="$2"
+	local RECORD_TYPE="$3"
+
+	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { _error "_cf_check_record_exists: missing arguments"; return 1; }
+
+	_debug "Checking for existing ${RECORD_TYPE} record named ${RECORD_NAME} in zone ${ZONE_ID}"
+	cf_api GET "/client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}&type=${RECORD_TYPE}"
+
+	if [[ $CURL_EXIT_CODE != "200" ]]; then
+		_debug "API call failed with exit code: $CURL_EXIT_CODE"
+		return 1
+	fi
+
+	local MATCH_COUNT
+	MATCH_COUNT=$(echo "$API_OUTPUT" | jq '.result | length')
+
+	if [[ $MATCH_COUNT -eq 0 ]]; then
+		_debug "No existing ${RECORD_TYPE} record found for ${RECORD_NAME}"
+		return 1
+	fi
+
+	_warning "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
+	printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "Type" "Name" "Content" "TTL" "Proxied" "Record ID"
+	printf "%s\n" "$(printf '%0.s-' {1..155})"
+	echo "$API_OUTPUT" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(.ttl)\t\(.proxied)\t\(.id)"' | while IFS=$'\t' read -r TYPE NAME CONTENT TTL PROXIED RID; do
+		[[ "$TTL" == "1" ]] && TTL="auto"
+		printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "$TYPE" "$NAME" "${CONTENT:0:45}" "$TTL" "$PROXIED" "$RID"
+	done
+
+	return 0
+}
 
 # ===============================================
 # -- zone_search - search for zone based on query
