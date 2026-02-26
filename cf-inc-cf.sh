@@ -406,7 +406,7 @@ Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxie
                     any text for TXT, spf definition text for SPF
                     coordinates for LOC (see RFC 1876 section 3)
 Options
-    [ttl]       Time To Live, 1 = auto
+	[ttl]       Time To Live, numeric value or auto (1 = auto)
     
     = MX records:
     [prio]      required only by MX and SRV records, enter \"10\" if unsure
@@ -858,6 +858,29 @@ function _escape_string () {
 	echo "$1" | sed 's/"/\\"/g'
 }
 
+function _cf_normalize_record_ttl () {
+	local ttl="$1"
+	if [[ -z "$ttl" || "$ttl" == "auto" ]]; then
+		echo 1
+		return 0
+	fi
+	if [[ "$ttl" =~ ^[0-9]+$ ]]; then
+		echo "$ttl"
+		return 0
+	fi
+	return 1
+}
+
+function _cf_is_boolean () {
+	local value="${1,,}"
+	[[ "$value" == "true" || "$value" == "false" ]]
+}
+
+function _cf_validate_record_priority () {
+	local prio="$1"
+	[[ -z "$prio" || "$prio" =~ ^[0-9]+$ ]]
+}
+
 # ==============================================================================================
 # -- Check Functions
 # ==============================================================================================
@@ -991,6 +1014,11 @@ function call_cf_v4 () {
 			# TODO: Replace json_decode with jq for better reliability and performance
 			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
 			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
+			local JSON_DECODE_EXIT=$?
+			if [[ $JSON_DECODE_EXIT -eq 2 ]]; then
+				_debug "API returned an error (json_decode exit 2)"
+				return 1
+			fi
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
             _debug "\$@ == $@"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
@@ -1064,7 +1092,7 @@ findout_record() {
 	declare -g record_type=${2^^}
 	local first_match=$3
 	local record_oldcontent=$4
-	local zname_zid
+	local try_zone
 	local zid
 	local test_record
 	declare -g zone_id=''
@@ -1074,16 +1102,15 @@ findout_record() {
 	declare -g record_content=''
 	echo -n "Searching zone ... "
 
-	for zname_zid in $(call_cf_v4 GET /zones -- .result %"%s:%s$NL" ,name,id);	do
-		zone=${zname_zid%%:*}
-		zone=${zone,,}
-		zid=${zname_zid##*:}
-		if [[ "$record_name" =~ ^((.*)\.|)$zone$ ]]; then
-			# TODO why is subdomain never used?
-			subdomain=${BASH_REMATCH[2]}
-			zone_id=$zid
+	try_zone="$record_name"
+	while [[ "$try_zone" == *.* ]]; do
+		zid=$(_cf_zone_id "$try_zone")
+		if [[ -n "$zid" && "$zid" != "null" ]]; then
+			zone="$try_zone"
+			zone_id="$zid"
 			break
 		fi
+		try_zone=${try_zone#*.}
 	done
 	[ -z "$zone_id" ] && { echo >&2; return 2; }
 	echo -n "$zone, searching record ... "
@@ -1093,7 +1120,8 @@ findout_record() {
 	IFS=$NL
 	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
 		IFS=$oldIFS
-		set -- "$test_record"
+		# shellcheck disable=SC2086
+		set -- $test_record
 		test_record_name=$1
 		shift
 

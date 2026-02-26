@@ -168,7 +168,7 @@ Usage: cloudflare add zone <name>
 
 ```
 $ cloudflare add record
-Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [service] [protocol] [weight] [port]
+Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
    <zone>      domain zone to register the record in, see 'show zones' command
    <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT, SPF, LOC
    <name>      subdomain name, or "@" to refer to the domain's root
@@ -178,6 +178,7 @@ Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio] [servic
                coordinates for LOC (see RFC 1876 section 3)
    [ttl]       Time To Live, 1 = auto
    [prio]      required only by MX and SRV records, enter "10" if unsure
+   [proxied]   true or false, only for A and CNAME records
    These ones are only for SRV records:
    [service]   service name, eg. "sip"
    [protocol]  tcp, udp, tls

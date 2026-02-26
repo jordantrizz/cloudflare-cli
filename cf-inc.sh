@@ -271,6 +271,12 @@ function _check_cloudflare_creds () {
     local CONFIG="$HOME/.cloudflare"
     local -a available_profiles=()
     local -a profile_descriptions=()
+
+    if [[ -f "$CONFIG" ]]; then
+        _debug "Processing .cloudflare file: $CONFIG"
+        # shellcheck source=/dev/null
+        source "$CONFIG"
+    fi
     
     # If API_PROFILE is explicitly set, try to use it first
     if [[ -n ${API_PROFILE:-} ]]; then
@@ -324,11 +330,7 @@ function _check_cloudflare_creds () {
         exit 1
     fi
     
-    _debug "Processing .cloudflare file: $CONFIG"
-    
-    # Source the config file so we can inspect variables
-    # shellcheck source=/dev/null
-    source "$CONFIG"
+    _debug ".cloudflare already sourced: $CONFIG"
     
     # Check for default CF_ACCOUNT and CF_KEY
     if [[ -n ${CF_ACCOUNT:-} ]]; then
@@ -612,7 +614,6 @@ function _set_credentials_from_profile() {
             local profile_name="${profile%_TOKEN}"
             local token_var="CF_TOKEN_${profile_name}"
             _debug "Token profile: profile_name=${profile_name}, token_var=${token_var}"
-            _debug "Token variable exists: [${!token_var}]"
             API_TOKEN="${!token_var}"
             API_METHOD="token"
             _debug "Set credentials: profile=${profile_name}, API_TOKEN=$(_mask_sensitive "${API_TOKEN}"), API_METHOD=${API_METHOD}"
