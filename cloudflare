@@ -258,6 +258,7 @@ add)
 		shift
 		content=$1
 		ttl=$2
+		type_upper="${type^^}"
 		if [[ "$type" == "A" ]] || [[ "$type" == "CNAME" ]]; then
 			proxied=$3
 		elif [[ "$type" == "MX" ]] || [[ "$type" == "SRV" ]]; then
@@ -268,11 +269,29 @@ add)
 		weight=$6
 		port=$7
 
-		[ -n "$proxied" ] || proxied=true
-		[ -n "$ttl" ] || ttl=1
-		# Convert "auto" to 1 for TTL
-		[[ "$ttl" == "auto" ]] && ttl=1
-		[ -n "$prio" ] || prio=10
+		normalized_ttl=$(_cf_normalize_record_ttl "$ttl") || {
+			help add record
+			_die "Invalid ttl '$ttl'. ttl must be a number or 'auto'."
+		}
+		ttl="$normalized_ttl"
+
+		if [[ "$type_upper" == "A" || "$type_upper" == "CNAME" ]]; then
+			[ -n "$proxied" ] || proxied=true
+			if ! _cf_is_boolean "$proxied"; then
+				help add record
+				_die "Invalid proxied '$proxied' for $type_upper record. Use true or false."
+			fi
+			proxied="${proxied,,}"
+		fi
+
+		if [[ "$type_upper" == "MX" || "$type_upper" == "SRV" ]]; then
+			[ -n "$prio" ] || prio=10
+			if ! _cf_validate_record_priority "$prio"; then
+				help add record
+				_die "Invalid priority '$prio' for $type_upper record. priority must be a number."
+			fi
+		fi
+
 		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
 		
 		_loading2 "Getting zone_id for $ZONE"
@@ -1236,4 +1255,3 @@ help)
 	_die "No Command provided." 1
 	;;
 esac
-
