@@ -33,6 +33,7 @@ HELP_OPTIONS="Options:
 	--debug, -D            Display API debugging info
 	--debug-curl, -DC      Display API debugging info and curl output
 	--quiet, -q            Less verbose
+	-y, --yes, --force     Skip confirmation prompts (e.g. when an existing record is found)
 	-E <email>             Cloudflare Email
 	-T <api_token>         Cloudflare API Token
 	-p, --profile NAME     Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
@@ -101,7 +102,7 @@ Additional Commands:
     check       - Activate check
                     zone <zone>
 
-    json        - Test json_decode function
+    json        - Test jq_decode function
                 PIPE| json <format>
 
     pass        - Pass through queries to CF API
@@ -157,7 +158,7 @@ HELP_CMDS="Commands:
 Additional Commands:
 --------------------
     check       - Activate check
-    json        - Test json_decode function
+    json        - Test jq_decode function
     ishex       - Check if string is hex
     pass        - Pass through queries to CF API
     help        - Full help
@@ -290,7 +291,7 @@ Additional Commands:
 	check       - Activate check
 					zone <zone>
 
-	json        - Test json_decode function
+	json        - Test jq_decode function
 				PIPE| json <format>
 
 	pass        - Pass through queries to CF API
@@ -419,6 +420,11 @@ Options
     [protocol]  tcp, udp, tls
     [weight]    relative weight for records with the same priority
     [port]      layer-4 port number
+
+    -y, --yes, --force   Skip the prompt when an existing record is found.
+
+Note: If a record with the same name and type already exists, you will be prompted
+      to confirm before creating a duplicate. Use -y/--force to skip this prompt.
 
 ${HELP_VERSION}
 "
@@ -831,9 +837,190 @@ json_decode() {
 
 
 # -----------------------------------------------
-# -- jq_decode - jq code to decode json
+# -- _jq_pfmt_field - Convert a json_decode pfmt field expression to a jq filter
+# -- Used internally by jq_decode
 # -----------------------------------------------
-# TODO - Add jq_decode function that utilizes jq versus PHP
+_jq_pfmt_field() {
+	local f="$1"
+	# Apply PHP str_replace(",,", ",") - ,, was used as escaped comma
+	f="${f//,,/,}"
+	local first="${f:0:1}"
+	if [[ "$first" == "?" ]]; then
+		# Ternary: ?condition?valueIfTrue?valueIfFalse
+		local rest="${f:1}"
+		local fcond="${rest%%\?*}"
+		rest="${rest#*\?}"
+		local ftrue="${rest%%\?*}"
+		local ffalse="${rest#*\?}"
+		local jq_true jq_false
+		jq_true=$(_jq_pfmt_field "$ftrue")
+		jq_false=$(_jq_pfmt_field "$ffalse")
+		echo "(if (.${fcond} // false) then ${jq_true} else ${jq_false} end)"
+	elif [[ "$first" == '"' ]]; then
+		# Literal string, possibly with PHP $var interpolation
+		local inner="${f:1:-1}"
+		local jq_str
+		jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
+		echo "\"${jq_str}\""
+	elif [[ "$first" == "<" ]]; then
+		# PHP eval expression
+		local code="${f:1}"
+		if [[ "${code:0:1}" == '"' ]]; then
+			# String interpolation: <"string with $var"
+			local inner="${code:1:-1}"
+			local jq_str
+			jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
+			echo "\"${jq_str}\""
+		else
+			# PHP expression like $var["key"] -> .var.key
+			local jq_path
+			jq_path=$(echo "$code" | \
+				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\]/.\1.\2/g' | \
+				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)/.\1/g')
+			echo "(${jq_path} // \"\")"
+		fi
+	elif [[ -z "$f" ]]; then
+		echo "\"\""
+	else
+		# Simple field (name) or nested (configuration.value)
+		# Arrays are joined with comma to match PHP repr_array behavior
+		echo "(.${f} | if type == \"array\" then map(tostring) | join(\",\") elif type == \"null\" then \"\" else tostring end)"
+	fi
+}
+
+# -----------------------------------------------
+# -- jq_decode - jq-based JSON decoder (replaces json_decode)
+# -- Supports the same argument syntax as json_decode
+# --
+# -- Parameter Syntax:
+# --   .key1.key2   - navigate into JSON path (from root)
+# --   %format      - set printf output format
+# --   ,f1,f2,...   - for each array element, extract fields as TSV
+# --   &field       - output a field value from the current object
+# --   &?c?true?false - ternary: if .c then true else false end
+# --   &<"str $var" - string with $var interpolation from current object
+# --   table        - display current data as key-value table
+# -----------------------------------------------
+jq_decode() {
+	_debug "jq_decode: ${*}"
+	local input
+	input=$(cat)
+
+	# -- Check for old-style error format
+	if echo "$input" | jq -e '.result == "error"' >/dev/null 2>&1; then
+		echo "$input" | jq -r '.msg // "Unknown error"' 2>/dev/null
+		return 2
+	fi
+
+	# -- Check for Cloudflare API error
+	if echo "$input" | jq -e '.success == false' >/dev/null 2>&1; then
+		echo "$input" | jq -r '.errors[]? | "E\(.code): \(.message)"' 2>/dev/null
+		return 2
+	fi
+
+	# -- Pagination check
+	local page total_pages
+	page=$(echo "$input" | jq -r '.result_info.page // 0' 2>/dev/null)
+	total_pages=$(echo "$input" | jq -r '.result_info.total_pages // 0' 2>/dev/null)
+	if [[ "$page" -gt 0 && "$page" -lt "$total_pages" ]] 2>/dev/null; then
+		echo "!has_more"
+	fi
+
+	# -- Process arguments
+	local current_data="$input"
+	local printf_fmt=""
+	local mode="default"
+	local -a fields=()
+	local -a per_record_fields=()
+
+	for arg in "$@"; do
+		if [[ "${arg:0:1}" == "." ]]; then
+			# Navigate JSON path (always from root of original input)
+			current_data=$(echo "$input" | jq "${arg}" 2>/dev/null)
+		elif [[ "${arg:0:1}" == "%" ]]; then
+			# printf format string
+			printf_fmt="${arg:1}"
+		elif [[ "${arg:0:1}" == "," ]]; then
+			# Field list: ,name,status,id
+			mode="fields"
+			local fields_str="${arg:1}"
+			# Protect ,, (escaped comma) during split, restore after
+			fields_str="${fields_str//,,/__ESCAPED_COMMA__}"
+			IFS=',' read -ra raw_fields <<< "$fields_str"
+			fields=()
+			local f
+			for f in "${raw_fields[@]}"; do
+				f="${f//__ESCAPED_COMMA__/,,}"
+				[[ -n "$f" ]] && fields+=("$f")
+			done
+		elif [[ "${arg:0:1}" == "&" ]]; then
+			# Per-record field output
+			mode="per_record"
+			local prf_str="${arg:1}"
+			local -a prf_parts=()
+			IFS='&' read -ra prf_parts <<< "$prf_str"
+			local f
+			for f in "${prf_parts[@]}"; do
+				[[ -n "$f" ]] && per_record_fields+=("$f")
+			done
+		elif [[ "$arg" == "table" ]]; then
+			mode="table"
+		fi
+	done
+
+	# -- Output based on mode
+	case "$mode" in
+		fields)
+			local -a jq_parts=()
+			local f
+			for f in "${fields[@]}"; do
+				jq_parts+=("$(_jq_pfmt_field "$f")")
+			done
+			local fields_jq
+			fields_jq=$(printf ', %s' "${jq_parts[@]}")
+			fields_jq="[${fields_jq:2}]"
+
+			local data_type
+			data_type=$(echo "$current_data" | jq -r 'type' 2>/dev/null)
+			local iter_expr
+			if [[ "$data_type" == "array" ]]; then
+				iter_expr=".[]"
+			else
+				# For non-array root, iterate over object values that are objects
+				iter_expr="to_entries | .[] | .value | select(type == \"object\")"
+			fi
+
+			if [[ -n "$printf_fmt" ]]; then
+				echo "$current_data" | jq -r "${iter_expr} | ${fields_jq} | @tsv" 2>/dev/null | \
+					while IFS=$'\t' read -ra row; do
+						# shellcheck disable=SC2059
+						printf "$printf_fmt" "${row[@]}"
+					done
+			else
+				echo "$current_data" | jq -r "${iter_expr} | ${fields_jq} | @tsv" 2>/dev/null
+			fi
+			;;
+
+		per_record)
+			local f
+			for f in "${per_record_fields[@]}"; do
+				echo "$current_data" | jq -r "$(_jq_pfmt_field "$f")" 2>/dev/null
+			done
+			;;
+
+		table)
+			echo "$current_data" | jq -r \
+				'to_entries | sort_by(.key) | .[] | [.key, (.value | if type == "array" then map(tostring) | join(",") elif type == "null" then "" else tostring end)] | @tsv' \
+				2>/dev/null
+			;;
+
+		default)
+			echo "$current_data" | jq -r \
+				'if type == "array" then .[] | tostring elif type == "object" then tostring else tostring end' \
+				2>/dev/null
+			;;
+	esac
+}
 
 # -----------------------------------------------
 # -- _die
@@ -1011,12 +1198,10 @@ function call_cf_v4 () {
 			fi
 
 			_debug "json-filter: ${*}"
-			# TODO: Replace json_decode with jq for better reliability and performance
-			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
-			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
-			local JSON_DECODE_EXIT=$?
-			if [[ $JSON_DECODE_EXIT -eq 2 ]]; then
-				_debug "API returned an error (json_decode exit 2)"
+			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | jq_decode "$@" 2>/dev/null)
+			local JQ_DECODE_EXIT=$?
+			if [[ $JQ_DECODE_EXIT -eq 2 ]]; then
+				_debug "API returned an error (jq_decode exit 2)"
 				return 1
 			fi
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
@@ -1157,6 +1342,47 @@ findout_record() {
 
 	echo "$record_id" >&2
 	[ -z "$record_id" ] && return 3
+
+	return 0
+}
+
+# ===============================================
+# -- _cf_check_record_exists $ZONE_ID $NAME $TYPE
+# -- Check if a DNS record with the given name and type already exists in the zone.
+# -- Outputs existing records to stdout when found.
+# -- Returns: 0 if one or more records exist, 1 if none found
+# -- Arguments: $1 - zone_id, $2 - record name, $3 - record type
+# ===============================================
+function _cf_check_record_exists () {
+	local ZONE_ID="$1"
+	local RECORD_NAME="$2"
+	local RECORD_TYPE="$3"
+
+	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { _error "_cf_check_record_exists: missing arguments"; return 1; }
+
+	_debug "Checking for existing ${RECORD_TYPE} record named ${RECORD_NAME} in zone ${ZONE_ID}"
+	cf_api GET "/client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}&type=${RECORD_TYPE}"
+
+	if [[ $CURL_EXIT_CODE != "200" ]]; then
+		_debug "API call failed with exit code: $CURL_EXIT_CODE"
+		return 1
+	fi
+
+	local MATCH_COUNT
+	MATCH_COUNT=$(echo "$API_OUTPUT" | jq '.result | length')
+
+	if [[ $MATCH_COUNT -eq 0 ]]; then
+		_debug "No existing ${RECORD_TYPE} record found for ${RECORD_NAME}"
+		return 1
+	fi
+
+	_warning "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
+	printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "Type" "Name" "Content" "TTL" "Proxied" "Record ID"
+	printf "%s\n" "$(printf '%0.s-' {1..155})"
+	echo "$API_OUTPUT" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(.ttl)\t\(.proxied)\t\(.id)"' | while IFS=$'\t' read -r TYPE NAME CONTENT TTL PROXIED RID; do
+		[[ "$TTL" == "1" ]] && TTL="auto"
+		printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "$TYPE" "$NAME" "${CONTENT:0:45}" "$TTL" "$PROXIED" "$RID"
+	done
 
 	return 0
 }

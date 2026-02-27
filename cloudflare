@@ -84,6 +84,9 @@ do
 			CLI_ACCOUNT_ID="$1"
 			_debug "Default account id specified: $CLI_ACCOUNT_ID"
 			;;
+		-y|--yes|--force)
+			FORCE_YES=1
+			;;
 		-h|--help)
 			help full
 			_die
@@ -295,6 +298,16 @@ add)
 		_cf_zone_exists "$ZONE"
 		ZONE_ID="$(_cf_zone_id "$ZONE")"
 		_loading2 " - Found zone $ZONE with id $ZONE_ID"
+
+		# -- Check for existing record and prompt to continue if found
+		if _cf_check_record_exists "$ZONE_ID" "$name" "$type"; then
+			if [[ "${FORCE_YES:-0}" != "1" ]]; then
+				read -r -p "A matching record already exists. Continue creating a new record? [y/N] " _confirm
+				[[ "${_confirm,,}" != "y" && "${_confirm,,}" != "yes" ]] && _die "Aborted by user."
+			else
+				_warning "Existing record found but --force/-y was specified, continuing."
+			fi
+		fi
 
 		RECORD_CREATE_OUTPUT="ID\tZone Name\tName\tType\tContent\tProxiable\tProxied\tTTL"
 		RECORD_CREATE_OUTPUT+="\n--\t---------\t----\t----\t-------\t---------\t-------\t---\n"
@@ -1202,13 +1215,11 @@ check)
 # ---------------
 # -- json command
 # ---------------
-# TODO: Replace json_decode with jq for better reliability and performance
-# This command uses the deprecated json_decode function. Consider rewriting to use jq instead.
 json)	
-	_loading "Reading STDIN data and sending to json_decode with args: ${@}"
+	_loading "Reading STDIN data and sending to jq_decode with args: ${@}"
 	JSON_FILE="$1"
 	shift
-	cat $JSON_FILE | json_decode "${@}"	
+	cat $JSON_FILE | jq_decode "${@}"	
 	;;
 # -----------------------------------------------
 # -- ishex command
@@ -1242,4 +1253,3 @@ help)
 	_die "No Command provided." 1
 	;;
 esac
-
