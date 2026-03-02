@@ -67,7 +67,7 @@ function _cf_bulkredirect_get_lists() {
     _loading "Getting all lists for account: ${ACCOUNT}"
     OUTPUT="ID\tName\tKind\tItems\n"
     OUTPUT+="--\t----\t----\t-----\n"
-    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists -- .result ,id,name,kind,num_items)
+    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists -- '.result[] | [.id,.name,.kind,.num_items] | @tsv')
     echo -e "$OUTPUT" | column -t
 }
 
@@ -77,14 +77,14 @@ function _cf_bulkredirect_get_list() {
     _loading "Getting list: ${LIST_ID} for account: ${ACCOUNT}"
     #OUTPUT="ID\tName\tKind\tItems\n"
     #OUTPUT+="--\t----\t----\t-----\n"
-    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists/${LIST_ID}/items -- .result .redirect ,source_url)
+    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists/${LIST_ID}/items -- '.result[] | .redirect | [.source_url] | @tsv')
     echo -e "$OUTPUT" | column -t
 }
 
 # -- Get Account ID from API Token
 function _cf_bulkredirect_get_account() {    
     _loading "Getting account details..."
-    call_cf_v4 GET /accounts -- .result ,id,name %"%s$TA%s$TA#%s$TA%s$TA%s$NL"
+    call_cf_v4 GET /accounts -- '.result[] | [.id,.name] | @tsv'
 }
 
 # ==============================================================================================

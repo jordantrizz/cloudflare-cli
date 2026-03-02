@@ -146,7 +146,7 @@ show|list)
 			_loading2 "Getting zone details for $DOMAIN with ID $ZONE_ID"
 			LIST_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 			LIST_ZONE_OUTPUT+="----\t------\t----\t--\t------------\t-------------------\n"
-			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/$ZONE_ID -- '.result | [.name,.status,.type,.id,(.name_servers | join(",")),(.original_name_servers | join(","))] | @tsv')
 			echo -e "$LIST_ZONE_OUTPUT" | column -t -s $'\t'
 		else
 			_die "No zone found for $DOMAIN"
@@ -174,12 +174,13 @@ show|list)
 			_die "No zone found for $CLI_ZONE"
 		fi
 
-		if [ "$details" = 1 ]; then		
-			fieldspec=,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
+		if [ "$details" = 1 ]; then
+			call_cf_v4 GET /zones/$ZONE_ID/settings -- '.result[] | [.id, (.value | tostring), (if .editable then "Editable" else "" end), (if .modified_on then ", mod: \(.modified_on)" else "" end)] | @tsv' | \
+				awk -F'\t' '{printf "%-30s %s\t%s%s\n", $1, $2, $3, $4}'
 		else
-			fieldspec=,id,value,\"\",\"\"
+			call_cf_v4 GET /zones/$ZONE_ID/settings -- '.result[] | [.id, (.value | tostring), "", ""] | @tsv' | \
+				awk -F'\t' '{printf "%-30s %s\t%s%s\n", $1, $2, $3, $4}'
 		fi
-		call_cf_v4 GET /zones/$ZONE_ID/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 
 	# -- records (all records for a zone)
@@ -209,7 +210,7 @@ show|list)
 	# -- access-rules
 	access-rules|listing|listings|blocking|blockings)
 		_pre_flight_check CF_
-		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
+		call_cf_v4 GET /user/firewall/access_rules/rules -- '.result[] | [.configuration.value,.mode,.modified_on,.notes] | @tsv'
 		;;
 	email-routing)
 		_pre_flight_check CF_
@@ -220,7 +221,7 @@ show|list)
 
 
 		#call_cf_v4 GET /zones/$ZONE_ID/email/routing --  %"%-30s %s$TA%s%s$NL" ',name,enabled,created,modified,status'
-		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' 
+		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- '.result[] | "name: \(.name)\nstatus: \(.status)\ncreated: \(.created)\nmodified: \(.modified)\nenabled: \(.enabled)"'
 		
 		;;
 	# -- no command catchall
@@ -352,7 +353,7 @@ add)
 			;;
 		TXT)
 			_loading2 " -- Creating TXT record: $name $content $ttl"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- '.result | [.id,.zone_name,.name,.type,.content,.proxiable,.proxied,.ttl] | @tsv')
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		A)
@@ -368,14 +369,14 @@ add)
 			;;
 		CNAME)
 			_loading2 " -- Creating CNAME record: $name $content $ttl $proxied"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- '.result | [.id,.zone_name,.name,.type,.content,.proxiable,.proxied,.ttl] | @tsv')
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 
 		*)  
 			_loading2 " -- Creating record: $name $content $ttl"
 			#  ,id,zone_name,name,type,content,proxiable,proxied,ttl			
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- '.result | [.id,.zone_name,.name,.type,.content,.proxiable,.proxied,.ttl] | @tsv')
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 
 			;;
@@ -459,7 +460,7 @@ add)
 		fi
 
 		# -- Create a new zone
-		CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers)
+		CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- '.result | [.name,.status,.type,.id,(.name_servers | join(","))] | @tsv')
 		CREATE_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\n"
 		CREATE_ZONE_OUTPUT+="----\t------\t----\t--\t------------\n"
 		CREATE_ZONE_OUTPUT+=$CREATE_ZONE_OUTPUT_CMD
@@ -579,7 +580,7 @@ delete)
 	listing)
 		_pre_flight_check CF_
 		[ -z "$1" ] && _die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
-		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
+		call_cf_v4 GET /user/firewall/access_rules/rules -- '.result[] | [.id,.configuration.value,.notes] | @tsv' |\
 		while read ruleid trg notes; do
 			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
 			then
@@ -612,7 +613,7 @@ delete)
 		_error "This will delete zone $DOMAIN with ID $ZONE_ID"		
 		DELETE_ZONE_ACCOUNT_DETAILS="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		DELETE_ZONE_ACCOUNT_DETAILS+="----\t------\t----\t--\t------------\t-------------------\n"
-		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/$ZONE_ID -- '.result | [.name,.status,.type,.id,(.name_servers | join(",")),(.original_name_servers | join(","))] | @tsv')
 		echo -e "$DELETE_ZONE_ACCOUNT_DETAILS" | column -t -s $'\t'
 		echo "===================================================================="
 		echo ""
@@ -803,7 +804,7 @@ change|set)
 
 		_loading2 "Updating record $record_name ($record_id)"
 		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}" -- \
-			%"  ID: %s$NL  Name: %s$NL  Type: %s$NL  Content: %s$NL  TTL: %s$NL  Proxied: %s$NL" ,id,name,type,content,ttl,proxied
+			'.result | "  ID: \(.id)\n  Name: \(.name)\n  Type: \(.type)\n  Content: \(.content)\n  TTL: \(.ttl)\n  Proxied: \(.proxied)"'
 		if [[ $? -eq 0 ]]; then
 			_success "Record updated successfully"
 		else
@@ -1055,7 +1056,7 @@ account)
 			_loading "Getting list of accounts"
 		fi
 		ACCOUNT_LIST_HEADER="Name\tID\tType\tCreated Date\n"
-		ACCOUNT_LIST_DATA=$(call_cf_v4 GET /accounts -- .result %"%s$TA%s$TA%s$TA%s$NL" ,name,id,type,created_on)
+		ACCOUNT_LIST_DATA=$(call_cf_v4 GET /accounts -- '.result[] | [.name,.id,.type,.created_on] | @tsv')
 		if [[ -n "$ACCOUNT_SEARCH" ]]; then
 			ACCOUNT_LIST_DATA=$(echo -e "$ACCOUNT_LIST_DATA" | grep -i "$ACCOUNT_SEARCH")
 		fi
@@ -1076,7 +1077,7 @@ account)
 		_loading "Getting zones for account $ACCOUNT_ID"
 		ACCOUNT_ZONE_LIST="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		ACCOUNT_ZONE_LIST+="----\t------\t----\t--\t------------\t-------------------\n"		
-		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id=$ACCOUNT_ID -- .result %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id=$ACCOUNT_ID -- '.result[] | [.name,.status,.type,.id,(.name_servers | join(",")),(.original_name_servers | join(","))] | @tsv')
 		echo -e "$ACCOUNT_ZONE_LIST" | column -t -s $'\t'
 		;;
 	*)
@@ -1202,13 +1203,11 @@ check)
 # ---------------
 # -- json command
 # ---------------
-# TODO: Replace json_decode with jq for better reliability and performance
-# This command uses the deprecated json_decode function. Consider rewriting to use jq instead.
 json)	
-	_loading "Reading STDIN data and sending to json_decode with args: ${@}"
+	_loading "Reading STDIN data and sending to jq_decode with args: ${@}"
 	JSON_FILE="$1"
 	shift
-	cat $JSON_FILE | json_decode "${@}"	
+	cat "$JSON_FILE" | jq_decode "${@}"	
 	;;
 # -----------------------------------------------
 # -- ishex command
@@ -1242,4 +1241,3 @@ help)
 	_die "No Command provided." 1
 	;;
 esac
-

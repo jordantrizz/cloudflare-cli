@@ -101,7 +101,7 @@ Additional Commands:
     check       - Activate check
                     zone <zone>
 
-    json        - Test json_decode function
+    json        - Test jq decode function
                 PIPE| json <format>
 
     pass        - Pass through queries to CF API
@@ -157,7 +157,7 @@ HELP_CMDS="Commands:
 Additional Commands:
 --------------------
     check       - Activate check
-    json        - Test json_decode function
+    json        - Test jq decode function
     ishex       - Check if string is hex
     pass        - Pass through queries to CF API
     help        - Full help
@@ -290,7 +290,7 @@ Additional Commands:
 	check       - Activate check
 					zone <zone>
 
-	json        - Test json_decode function
+	json        - Test jq decode function
 				PIPE| json <format>
 
 	pass        - Pass through queries to CF API
@@ -833,7 +833,32 @@ json_decode() {
 # -----------------------------------------------
 # -- jq_decode - jq code to decode json
 # -----------------------------------------------
-# TODO - Add jq_decode function that utilizes jq versus PHP
+function jq_decode () {
+	local input jq_filter page total_pages
+	input=$(cat)
+	jq_filter="$*"
+	[[ -z "$jq_filter" ]] && jq_filter='if .success then "Successfully Completed!" else "failed" end'
+
+	# -- Check for old-style error format
+	if echo "$input" | jq -e '.result == "error"' >/dev/null 2>&1; then
+		echo "$input" | jq -r '.msg // "Unknown error"' 2>/dev/null
+		return 2
+	fi
+
+	# -- Check for Cloudflare API error
+	if echo "$input" | jq -e '.success == false' >/dev/null 2>&1; then
+		echo "$input" | jq -r '.errors[]? | "E\(.code): \(.message)"' 2>/dev/null
+		return 2
+	fi
+
+	echo "$input" | jq -r "$jq_filter" 2>/dev/null || return 1
+
+	page=$(echo "$input" | jq -r '.result_info?.page // 0' 2>/dev/null)
+	total_pages=$(echo "$input" | jq -r '.result_info?.total_pages // 0' 2>/dev/null)
+	if [[ "$page" =~ ^[0-9]+$ && "$total_pages" =~ ^[0-9]+$ ]] && (( page > 0 && page < total_pages )); then
+		echo "!has_more"
+	fi
+}
 
 # -----------------------------------------------
 # -- _die
@@ -901,9 +926,9 @@ function _check_quiet () {
 # ===============================================
 # -- call_cf_v4 - Main call to cloudflare using curl
 # --
-# -- Invocation: call_cf_v4 <METHOD> <URL_PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+# -- Invocation: call_cf_v4 <METHOD> <URL_PATH> [PARAMETERS] [-- JQ-FILTER]
 # --
-# -- Example: call_cf_v4 GET /zones name="$zone" -- .result ,id
+# -- Example: call_cf_v4 GET /zones name="$zone" -- '.result[] | .id'
 # ===============================================
 function call_cf_v4 () {
 	_debug "function:${FUNCNAME[0]} - ${*}"
@@ -955,7 +980,7 @@ function call_cf_v4 () {
 
 	# -- Check for zero parameters
 	if [ -z "$1" ]; then
-		set -- '&?success?"Successfully Completed!"?"failed"'
+		set -- 'if .success then "Successfully Completed!" else "failed" end'
 	fi
 
 	# -- Testing check
@@ -1010,13 +1035,11 @@ function call_cf_v4 () {
 				return 1
 			fi
 
-			_debug "json-filter: ${*}"
-			# TODO: Replace json_decode with jq for better reliability and performance
-			# See: https://github.com/cloudflare/cloudflare-cli/issues/XXX
-			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | json_decode "$@" 2>/dev/null)
-			local JSON_DECODE_EXIT=$?
-			if [[ $JSON_DECODE_EXIT -eq 2 ]]; then
-				_debug "API returned an error (json_decode exit 2)"
+			_debug "jq-filter: ${*}"
+			PROCESSED_OUTPUT=$(echo "$CURL_OUTPUT" | jq_decode "$@" 2>/dev/null)
+			local JQ_DECODE_EXIT=$?
+			if [[ $JQ_DECODE_EXIT -eq 2 ]]; then
+				_debug "API returned an error (jq_decode exit 2)"
 				return 1
 			fi
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
@@ -1062,7 +1085,7 @@ function _cf_zone_create_v4 () {
 		JSON="{\"name\":\"$DOMAIN\",\"jump_start\":true}"
 	fi
 
-	CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers) || return 1
+	CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- '.result | [.name,.status,.type,.id,(.name_servers | join(","))] | @tsv') || return 1
 
 	ZONE_ID=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $4}')
 	NAME_SERVERS=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $5}')
@@ -1118,7 +1141,7 @@ findout_record() {
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
+	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- '.result[] | [.name,.type,.id,.ttl,.content] | @tsv'); do
 		IFS=$oldIFS
 		# shellcheck disable=SC2086
 		set -- $test_record
