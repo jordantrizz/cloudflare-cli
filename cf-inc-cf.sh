@@ -589,317 +589,8 @@ esac
 # =================================================================================================
 
 # -----------------------------------------------
-# -- json_decode - php code to decode json
-# -----------------------------------------------
-json_decode() {
-	# Parameter Synatx
-	#
-	# .key1.key11.key111
-	#    dive into array
-	# %format
-	#    set output formatting
-	# table
-	#    display as a table
-	# ,mod1,mod2,...
-	#    see modifiers
-	# &mod1&mod2&...
-	#    modifiers per line
-	#
-	#
-	# Modifier Synatx
-	#
-	# ?modCondition?modTrue?modFalse
-	#    tenary expression
-	# ||key1||key2||key3||...
-	#    find a true-ish value
-	# key.subkey.subsubkey
-	#    dive into array
-	# !key
-	#    implode non-zero elements of key
-	# !!key1 key2 key3 ...
-	#    implode values of keys if they are not false
-	# <code
-	#    evaluate code, keyN are in $keyN
-	# "string"
-	#    literal
-	# @suffixKey@stringKey
-	#    trim suffix from string
-	# key
-	#    represent the value
-	_debug "json_decode: ${*}"
-
-	# shellcheck disable=SC2016
-	php -d "error_reporting=E_ALL & ~E_WARNING" -r '
-		function notzero($e)
-		{
-			return $e!=0;
-		}
-		function repr_array($a, $brackets=false)
-		{
-			if(is_array($a))
-			{
-				$o = array();
-				foreach($a as $k => $v)
-				{
-					$o[] = (is_int($k) ? "" : "$k=") . repr_array($v, true);
-				}
-				if(count($o) > 1 and $brackets)
-					return "[" . implode(",", $o) . "]";
-				else
-					return implode(",", $o);
-			}
-			else
-				return $a;
-		}
-		function pfmt($fmt, &$array, $care_null=1)
-		{
-			if(preg_match("/^\?(.*?)\?(.*?)\?(.*)/", $fmt, $grp))
-			{
-				$out = pfmt($grp[1], $array, 0) ? pfmt($grp[2], $array) : pfmt($grp[3], $array);
-			}
-			elseif(preg_match("/^!!(.*)/", $fmt, $grp))
-			{
-				$out = implode(",", array_filter(preg_split("/\s+/", $grp[1]), function($k) use($array){ return !!$array[$k]; }));
-			}
-			elseif(preg_match("/^!(.*)/", $fmt, $grp))
-			{
-				$out = implode(",", array_keys(array_filter($array[$grp[1]], "notzero")));
-			}
-			elseif(preg_match("/^<(.*)/", $fmt, $grp))
-			{
-				$code = $grp[1];
-				extract($array, EXTR_SKIP);
-				$out = eval("return $code;");
-			}
-			elseif(preg_match("/^\x22(.*?)\x22/", $fmt, $grp))
-			{
-				$out = $grp[1];
-			}
-			elseif(preg_match("/^@(.*?)@(.*)/", $fmt, $grp))
-			{
-				$out = substr($array[$grp[2]], 0, -strlen(".".$array[$grp[1]]));
-				if($out == "") $out = "@";
-			}
-			elseif(preg_match("/^\|\|/", $fmt))
-			{
-				while(preg_match("/^\|\|(.*?)(\|\|.*|$)/", $fmt, $grp))
-				{
-					if(pfmt($grp[1], $array, 0) != false or !preg_match("/^\|\|/", $grp[2]))
-					{
-						$out = pfmt($grp[1], $array, $care_null);
-						break;
-					}
-					$fmt = $grp[2];
-				}
-			}
-			elseif(preg_match("/(.+?)\.(.+)/", $fmt, $grp))
-			{
-				if(is_array(@$array[$grp[1]]))
-					$out = pfmt($grp[2], $array[$grp[1]], $care_null);
-				else
-					$out = NULL;
-			}
-			else
-			{
-				/* Fix Cludflare´s DNS notation.
-				   We must use FQDN with the trailing dot if no $ORIGIN declared. */
-				if(in_array(@$array["type"], explode(",", "CNAME,MX,NS,SRV")) and isset($array["content"]) and substr($array["content"], -1) != ".")
-				{
-					$array["content"] .= ".";
-				}
-				if(is_array(@$array[$fmt]))
-				{
-					$out = repr_array($array[$fmt]);
-				}
-				else
-				{
-					$out = $care_null ? (array_key_exists($fmt, $array) ? (isset($array[$fmt]) ? $array[$fmt] : "NULL" ) : "NA") : @$array[$fmt];
-				}
-			}
-			return $out;
-		}
-		
-		$data0 = json_decode(file_get_contents("php://stdin"), true);
-		if('$DEBUG') file_put_contents("php://stderr", var_export($data0, 1));
-		if(@$data0["result"] == "error")
-		{
-			echo $data0["msg"] . "\n";
-			exit(2);
-		}
-		if(array_key_exists("success", $data0) and !$data0["success"])
-		{
-			function prnt_error($e)
-			{
-				printf("E%s: %s\n", $e["code"], $e["message"]);
-				foreach((array)@$e["error_chain"] as $e) prnt_error($e);
-			}
-			foreach($data0["errors"] as $e) prnt_error($e);
-			exit(2);
-		}
-		
-		if(isset($data0["result_info"]["page"]) and $data0["result_info"]["page"] < $data0["result_info"]["total_pages"])
-		{
-			echo "!has_more\n";
-		}
-		
-		array_shift($argv);
-		$data = $data0;
-		foreach($argv as $param)
-		{
-			if($param == "")
-			{
-				continue;
-			}
-			if(substr($param, 0, 1) == ".")
-			{
-				$data = $data0;
-				foreach(explode(".", $param) as $p)
-				{
-					if($p != "")
-					{
-						if(array_key_exists($p, $data))
-						{
-							if($p == "objs" and @$data["has_more"])
-							{
-								echo "!has_more\n";
-								echo "!count=", $data["count"], "\n";
-							}
-							$data = $data[$p];
-						}
-						else
-						{
-							$data = array();
-							break;
-						}
-					}
-				}
-			}
-			if(substr($param, 0, 1) == "%")
-			{
-				$outfmt = substr($param, 1);
-			}
-			if($param == "table")
-			{
-				ksort($data);
-				$maxlength = 0;
-				foreach($data as $key=>$elem)
-				{
-					if(strlen($key) > $maxlength)
-					{
-						$maxlength = strlen($key);
-					}
-				}
-				foreach($data as $key=>$elem)
-				{
-					printf("%-".$maxlength."s\t%s\n", $key, (string)$elem);
-				}
-			}
-			if(substr($param, 0, 1) == ",")
-			{
-				foreach($data as $key=>$elem)
-				{
-					$out = array();
-					foreach(preg_split("/(?<!,),(?!,)/", $param) as $p)
-					{
-						$p = str_replace(",,", ",", $p);
-						if($p != "")
-						{
-							$out[] = pfmt($p, $elem);
-						}
-					}
-					if(isset($outfmt))
-					{
-						vprintf($outfmt, $out);
-					}
-					else
-					{
-						echo implode("\t", $out), "\n";
-					}
-				}
-			}
-			if(substr($param, 0, 1) == "&")
-			{
-				foreach(explode("&", $param) as $p)
-				{
-					if($p!="")
-					{
-						echo pfmt($p, $data), "\n";
-					}
-				}
-			}
-		}
-	' "$@"
-}
-
-# ==============================================================================================
-# -- General Functions
-# ==============================================================================================
-
-
-# -----------------------------------------------
-# -- _jq_pfmt_field - Convert a json_decode pfmt field expression to a jq filter
-# -- Used internally by jq_decode
-# -----------------------------------------------
-_jq_pfmt_field() {
-	local f="$1"
-	# Apply PHP str_replace(",,", ",") - ,, was used as escaped comma
-	f="${f//,,/,}"
-	local first="${f:0:1}"
-	if [[ "$first" == "?" ]]; then
-		# Ternary: ?condition?valueIfTrue?valueIfFalse
-		local rest="${f:1}"
-		local fcond="${rest%%\?*}"
-		rest="${rest#*\?}"
-		local ftrue="${rest%%\?*}"
-		local ffalse="${rest#*\?}"
-		local jq_true jq_false
-		jq_true=$(_jq_pfmt_field "$ftrue")
-		jq_false=$(_jq_pfmt_field "$ffalse")
-		echo "(if (.${fcond} // false) then ${jq_true} else ${jq_false} end)"
-	elif [[ "$first" == '"' ]]; then
-		# Literal string, possibly with PHP $var interpolation
-		local inner="${f:1:-1}"
-		local jq_str
-		jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
-		echo "\"${jq_str}\""
-	elif [[ "$first" == "<" ]]; then
-		# PHP eval expression
-		local code="${f:1}"
-		if [[ "${code:0:1}" == '"' ]]; then
-			# String interpolation: <"string with $var"
-			local inner="${code:1:-1}"
-			local jq_str
-			jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
-			echo "\"${jq_str}\""
-		else
-			# PHP expression like $var["key"] -> .var.key
-			local jq_path
-			jq_path=$(echo "$code" | \
-				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\]/.\1.\2/g' | \
-				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)/.\1/g')
-			echo "(${jq_path} // \"\")"
-		fi
-	elif [[ -z "$f" ]]; then
-		echo "\"\""
-	else
-		# Simple field (name) or nested (configuration.value)
-		# Arrays are joined with comma to match PHP repr_array behavior
-		echo "(.${f} | if type == \"array\" then map(tostring) | join(\",\") elif type == \"null\" then \"\" else tostring end)"
-	fi
-}
-
-# -----------------------------------------------
-# -- jq_decode - jq-based JSON decoder (replaces json_decode)
-# -- Supports the same argument syntax as json_decode
-# --
-# -- Parameter Syntax:
-# --   .key1.key2   - navigate into JSON path (from root)
-# --   %format      - set printf output format
-# --   ,f1,f2,...   - for each array element, extract fields as TSV
-# --   &field       - output a field value from the current object
-# --   &?c?true?false - ternary: if .c then true else false end
-# --   &<"str $var" - string with $var interpolation from current object
-# --   table        - display current data as key-value table
+# -- jq_decode - jq-based JSON decoder
+# -- Accepts one or more jq filters as arguments.
 # -----------------------------------------------
 jq_decode() {
 	_debug "jq_decode: ${*}"
@@ -926,100 +617,15 @@ jq_decode() {
 		echo "!has_more"
 	fi
 
-	# -- Process arguments
-	local current_data="$input"
-	local printf_fmt=""
-	local mode="default"
-	local -a fields=()
-	local -a per_record_fields=()
+	if [[ $# -eq 0 ]]; then
+		echo "$input" | jq -r 'if type == "array" then .[] | tostring elif type == "object" then tostring else tostring end' 2>/dev/null
+		return 0
+	fi
 
-	for arg in "$@"; do
-		if [[ "${arg:0:1}" == "." ]]; then
-			# Navigate JSON path (always from root of original input)
-			current_data=$(echo "$input" | jq "${arg}" 2>/dev/null)
-		elif [[ "${arg:0:1}" == "%" ]]; then
-			# printf format string
-			printf_fmt="${arg:1}"
-		elif [[ "${arg:0:1}" == "," ]]; then
-			# Field list: ,name,status,id
-			mode="fields"
-			local fields_str="${arg:1}"
-			# Protect ,, (escaped comma) during split, restore after
-			fields_str="${fields_str//,,/__ESCAPED_COMMA__}"
-			IFS=',' read -ra raw_fields <<< "$fields_str"
-			fields=()
-			local f
-			for f in "${raw_fields[@]}"; do
-				f="${f//__ESCAPED_COMMA__/,,}"
-				[[ -n "$f" ]] && fields+=("$f")
-			done
-		elif [[ "${arg:0:1}" == "&" ]]; then
-			# Per-record field output
-			mode="per_record"
-			local prf_str="${arg:1}"
-			local -a prf_parts=()
-			IFS='&' read -ra prf_parts <<< "$prf_str"
-			local f
-			for f in "${prf_parts[@]}"; do
-				[[ -n "$f" ]] && per_record_fields+=("$f")
-			done
-		elif [[ "$arg" == "table" ]]; then
-			mode="table"
-		fi
+	local filter
+	for filter in "$@"; do
+		echo "$input" | jq -r "$filter" 2>/dev/null || return 1
 	done
-
-	# -- Output based on mode
-	case "$mode" in
-		fields)
-			local -a jq_parts=()
-			local f
-			for f in "${fields[@]}"; do
-				jq_parts+=("$(_jq_pfmt_field "$f")")
-			done
-			local fields_jq
-			fields_jq=$(printf ', %s' "${jq_parts[@]}")
-			fields_jq="[${fields_jq:2}]"
-
-			local data_type
-			data_type=$(echo "$current_data" | jq -r 'type' 2>/dev/null)
-			local iter_expr
-			if [[ "$data_type" == "array" ]]; then
-				iter_expr=".[]"
-			else
-				# For non-array root, iterate over object values that are objects
-				iter_expr="to_entries | .[] | .value | select(type == \"object\")"
-			fi
-
-			if [[ -n "$printf_fmt" ]]; then
-				echo "$current_data" | jq -r "${iter_expr} | ${fields_jq} | @tsv" 2>/dev/null | \
-					while IFS=$'\t' read -ra row; do
-						# shellcheck disable=SC2059
-						printf "$printf_fmt" "${row[@]}"
-					done
-			else
-				echo "$current_data" | jq -r "${iter_expr} | ${fields_jq} | @tsv" 2>/dev/null
-			fi
-			;;
-
-		per_record)
-			local f
-			for f in "${per_record_fields[@]}"; do
-				echo "$current_data" | jq -r "$(_jq_pfmt_field "$f")" 2>/dev/null
-			done
-			;;
-
-		table)
-			echo "$current_data" | jq -r \
-				'to_entries | sort_by(.key) | .[] | [.key, (.value | if type == "array" then map(tostring) | join(",") elif type == "null" then "" else tostring end)] | @tsv' \
-				2>/dev/null
-			;;
-
-		default)
-			echo "$current_data" | jq -r \
-				'if type == "array" then .[] | tostring elif type == "object" then tostring else tostring end' \
-				2>/dev/null
-			;;
-	esac
 }
 
 # -----------------------------------------------
@@ -1088,9 +694,9 @@ function _check_quiet () {
 # ===============================================
 # -- call_cf_v4 - Main call to cloudflare using curl
 # --
-# -- Invocation: call_cf_v4 <METHOD> <URL_PATH> [PARAMETERS] [-- JSON-DECODER-ARGS]
+# -- Invocation: call_cf_v4 <METHOD> <URL_PATH> [PARAMETERS] [-- JQ-FILTERS]
 # --
-# -- Example: call_cf_v4 GET /zones name="$zone" -- .result ,id
+# -- Example: call_cf_v4 GET /zones name="$zone" -- '.result[] | .id'
 # ===============================================
 function call_cf_v4 () {
 	_debug "function:${FUNCNAME[0]} - ${*}"
@@ -1142,7 +748,7 @@ function call_cf_v4 () {
 
 	# -- Check for zero parameters
 	if [ -z "$1" ]; then
-		set -- '&?success?"Successfully Completed!"?"failed"'
+		set -- 'if .success then "Successfully Completed!" else "failed" end'
 	fi
 
 	# -- Testing check
@@ -1247,7 +853,7 @@ function _cf_zone_create_v4 () {
 		JSON="{\"name\":\"$DOMAIN\",\"jump_start\":true}"
 	fi
 
-	CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- %"%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers) || return 1
+	CREATE_ZONE_OUTPUT_CMD=$(call_cf_v4 POST /zones "$JSON" -- '.result | [.name, .status, .type, .id, (.name_servers // [] | join(","))] | @tsv') || return 1
 
 	ZONE_ID=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $4}')
 	NAME_SERVERS=$(echo "$CREATE_ZONE_OUTPUT_CMD" | awk -F'\t' '{print $5}')
@@ -1303,7 +909,7 @@ findout_record() {
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
+	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- '.result[] | [.name, .type, .id, .ttl, .content] | @tsv'); do
 		IFS=$oldIFS
 		# shellcheck disable=SC2086
 		set -- $test_record
@@ -1401,7 +1007,7 @@ function zone_search () {
 	# Get a list of all zones using jq for parsing
 	_debug "Calling API: GET /zones"
 	
-	# Build curl command to get zones - bypass json_decode
+	# Build curl command to get zones
 	local QUERY_STRING="?page=1&per_page=100"
 	local CURL_OUTPUT
 	
