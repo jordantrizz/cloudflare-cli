@@ -587,7 +587,7 @@ delete)
 	listing)
 		_pre_flight_check CF_
 		[ -z "$1" ] && _die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
-		call_cf_v4 GET /user/firewall/access_rules/rules -- '.result[] | [.id, .configuration.value, .notes] | @tsv' |\
+		call_cf_v4 GET /user/firewall/access_rules/rules -- '.result[] | [.id, .configuration.value, (.notes // "")] | @tsv' |\
 		while read ruleid trg notes; do
 			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
 			then
