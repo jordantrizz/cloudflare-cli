@@ -30,6 +30,7 @@ HELP_VERSION="Version: $VERSION"
 HELP_OPTIONS="Options:
 ---------
 	--details, -d          Display detailed info where possible
+	--csv                  Output supported command results as CSV
 	--debug, -D            Display API debugging info
 	--debug-curl, -DC      Display API debugging info and curl output
 	--quiet, -q            Less verbose
@@ -100,6 +101,7 @@ Additional Commands:
     profiles   - List profiles
 
     check       - Activate check
+					managed <domain>
                     zone <zone>
 
     json        - Test jq_decode function
@@ -136,8 +138,36 @@ Examples:
 
 ${HELP_EXAMPLES}
 ${HELP_VERSION}
-
 Enter \"cloudflare help\" to list available commands."
+
+# =====================================
+# -- _cf_print_zone_managed_result
+# -- Print managed-zone check result in human or CSV format
+# =====================================
+function _cf_print_zone_managed_result () {
+	local RESULT_LINE="$1"
+	local DOMAIN
+	local MANAGED
+	local STATUS
+	local ZONE_ID
+
+	IFS=$'\t' read -r DOMAIN MANAGED STATUS ZONE_ID <<< "$RESULT_LINE"
+
+	if [[ ${CSV:-0} == "1" ]]; then
+		printf '%s\n' 'domain,managed,status,zone_id'
+		printf '%s,%s,%s,%s\n' "$DOMAIN" "$MANAGED" "$STATUS" "$ZONE_ID"
+		return 0
+	fi
+
+	if [[ "$MANAGED" == "yes" ]]; then
+		_success "Domain is managed by the current account - $DOMAIN"
+		printf 'Status\tZone ID\n'
+		printf '%s\t%s\n' "$STATUS" "$ZONE_ID" | column -t -s $'\t'
+		return 0
+	fi
+
+	_warning "Domain is not managed by the current account - $DOMAIN"
+}
 
 # -----------------------------------------------
 # -- HELP_CMDS
@@ -289,6 +319,7 @@ Additional Commands:
 	profiles   - List profiles
 
 	check       - Activate check
+					managed <domain>
 					zone <zone>
 
 	json        - Test jq_decode function

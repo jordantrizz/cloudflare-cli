@@ -307,6 +307,41 @@ function _cf_zone_id () {
     fi
 }
 
+# =====================================
+# -- _cf_zone_managed_info $DOMAIN_NAME
+# -- Returns tab-separated: domain managed status zone_id
+# -- Exit codes: 0 managed, 2 not managed, 1 API/auth failure
+# =====================================
+cf_api_functions["_cf_zone_managed_info"]="Get managed zone info"
+function _cf_zone_managed_info () {
+    local DOMAIN_NAME=$1
+    local ZONE_DATA
+    local ZONE_ID
+    local ZONE_STATUS
+
+    [[ -z $DOMAIN_NAME ]] && _error "Missing domain name" && return 1
+
+    _debug "function:${FUNCNAME[0]}"
+    _debug "Checking managed status for ${DOMAIN_NAME}"
+
+    cf_api GET /client/v4/zones?name=${DOMAIN_NAME}
+    if [[ $CURL_EXIT_CODE != "200" ]]; then
+        _debug "Failed to check managed status for ${DOMAIN_NAME}: $MESG - $API_OUTPUT"
+        return 1
+    fi
+
+    ZONE_DATA=$(echo "$API_OUTPUT" | jq -r '.result[0] // empty')
+    if [[ -z $ZONE_DATA ]]; then
+        printf '%s\t%s\t%s\t%s\n' "$DOMAIN_NAME" "no" "" ""
+        return 2
+    fi
+
+    ZONE_ID=$(echo "$ZONE_DATA" | jq -r '.id // ""')
+    ZONE_STATUS=$(echo "$ZONE_DATA" | jq -r '.status // ""')
+    printf '%s\t%s\t%s\t%s\n' "$DOMAIN_NAME" "yes" "$ZONE_STATUS" "$ZONE_ID"
+    return 0
+}
+
 # ===================================
 # -- _cf_account_info $ACCOUNT_ID
 # -- Get account id, account name and admins

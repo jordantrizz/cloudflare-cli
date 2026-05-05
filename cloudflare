@@ -5,6 +5,7 @@
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
 API_PROFILE=""
+CSV=0
 # Default account id for create-style commands (set via --account-id)
 CLI_ACCOUNT_ID=""
 # Multi-zone processing globals
@@ -68,6 +69,11 @@ do
 			;;
 		-d|--detail|--detailed|--details)
 			details=1
+			shift
+			continue
+			;;
+		--csv)
+			CSV=1
 			shift
 			continue
 			;;
@@ -1243,6 +1249,19 @@ proxy)
 # ----------------
 check)
 	case "$1" in
+	managed)
+		shift
+		DOMAIN="$1"
+		[ -z "$DOMAIN" ] && _die "Usage: cloudflare check managed <domain>"
+		_pre_flight_check CF_
+		MANAGED_INFO="$(_cf_zone_managed_info "$DOMAIN")"
+		CHECK_EXIT_CODE=$?
+		if [[ $CHECK_EXIT_CODE -eq 1 ]]; then
+			_die "Unable to determine whether $DOMAIN is managed by the current account"
+		fi
+		_cf_print_zone_managed_result "$MANAGED_INFO"
+		exit $CHECK_EXIT_CODE
+		;;
 	zone)
 		shift
 		DOMAIN="$1"
@@ -1255,6 +1274,7 @@ check)
 		;;
 	*)
 		_die "Parameters:
+   managed
    zone"
 		;;
 	esac

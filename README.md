@@ -6,6 +6,7 @@ CLI utility managing CloudFlare services highly focused on DNS using CloudFlare 
 ```
 Usage: cloudflare [Options] <command> <parameters>
 Options:
+ --csv           Output supported command results as CSV
  --details, -d    Display detailed info where possible
  --debug, -D      Display API debugging info
  --quiet, -q      Less verbose
@@ -283,6 +284,29 @@ Parameters:
 ```
 $ cloudflare check zone
 Usage: cloudflare check zone <zone>
+```
+
+```
+$ cloudflare check managed
+Usage: cloudflare check managed <domain>
+```
+
+Check whether a domain is managed by the current Cloudflare account:
+
+```bash
+cloudflare check managed example.com
+```
+
+CSV output is available through the global `--csv` flag:
+
+```bash
+cloudflare --csv check managed example.com
+```
+
+The CSV columns are:
+
+```text
+domain,managed,status,zone_id
 ```
 
 
