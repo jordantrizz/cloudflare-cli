@@ -1,4 +1,10 @@
 # Todo
+
+## Ideas
+
+* Extend --csv support to other list/show commands
+* Add an end-to-end CLI test that invokes cloudflare.sh directly with mocked API responses
+
 ## 1.4.2
 ### Plan
 #### Phase 1: CLI Input Handling
@@ -38,6 +44,7 @@
 - [ ] Commit and tag release
 
 ### Add in support for applying rules to multiple domains.
+
 * Allow specifying multiple -d options in the command line.
 * Allow specifying zones.txt with zone domains or zoneid's to apply rules to multiple zones.
 * Update README.md with examples of using multiple domains.
