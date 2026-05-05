@@ -1252,8 +1252,14 @@ check)
 	managed)
 		shift
 		DOMAIN="$1"
-		[ -z "$DOMAIN" ] && _die "Usage: cloudflare check managed <domain>"
+		if [[ ${#ZONES_TO_PROCESS[@]} -eq 0 ]] && [[ -z "$DOMAIN" ]]; then
+			_die "Usage: cloudflare [(-z <zone> [-z <zone> ...]) | (-f <zones-file>) | <domain>] check managed"
+		fi
 		_pre_flight_check CF_
+		if [[ ${#ZONES_TO_PROCESS[@]} -gt 0 ]]; then
+			_cf_zone_managed_check_many "${ZONES_TO_PROCESS[@]}"
+			exit $?
+		fi
 		MANAGED_INFO="$(_cf_zone_managed_info "$DOMAIN")"
 		CHECK_EXIT_CODE=$?
 		if [[ $CHECK_EXIT_CODE -eq 1 ]]; then

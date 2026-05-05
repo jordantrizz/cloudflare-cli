@@ -21,6 +21,7 @@ CURL_EXIT_CODE=""
 MESG=""
 CSV=0
 QUIET=0
+ZONES_TO_PROCESS=()
 
 _test_pass() {
     ((TESTS_PASSED++))
@@ -130,6 +131,69 @@ test_cf_print_zone_managed_result() {
     fi
 }
 
+test_cf_zone_managed_check_many() {
+    local OUTPUT
+    local RESULT
+
+    _test_section "Testing _cf_zone_managed_check_many()"
+
+    ((TESTS_RUN++))
+    CSV=1
+    ZONES_TO_PROCESS=("example.com" "missing.example.com")
+    CF_API_SCENARIO="managed"
+    OUTPUT=$(
+        cf_api() {
+            local method="$1"
+            local path="$2"
+            case "$path" in
+                */zones\?name=example.com)
+                    CURL_EXIT_CODE="200"
+                    API_OUTPUT='{"result":[{"id":"zone-123","name":"example.com","status":"active"}]}'
+                    ;;
+                */zones\?name=missing.example.com)
+                    CURL_EXIT_CODE="200"
+                    API_OUTPUT='{"result":[]}'
+                    ;;
+            esac
+        }
+        _cf_zone_managed_check_many "${ZONES_TO_PROCESS[@]}"
+    )
+    RESULT=$?
+    if [[ $RESULT -eq 2 ]] && [[ $(echo "$OUTPUT" | grep -c '^domain,managed,status,zone_id$') -eq 1 ]] && echo "$OUTPUT" | grep -q '^example.com,yes,active,zone-123$' && echo "$OUTPUT" | grep -q '^missing.example.com,no,,$'; then
+        _test_pass "Prints one CSV header and aggregates mixed managed results"
+    else
+        _test_fail "Prints one CSV header and aggregates mixed managed results" "exit 2 and one CSV header" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    CSV=0
+    ZONES_TO_PROCESS=("example.com" "broken.example.com")
+    OUTPUT=$(
+        cf_api() {
+            local method="$1"
+            local path="$2"
+            case "$path" in
+                */zones\?name=example.com)
+                    CURL_EXIT_CODE="200"
+                    API_OUTPUT='{"result":[{"id":"zone-123","name":"example.com","status":"active"}]}'
+                    ;;
+                */zones\?name=broken.example.com)
+                    CURL_EXIT_CODE="403"
+                    MESG="Forbidden"
+                    API_OUTPUT='{"success":false}'
+                    ;;
+            esac
+        }
+        _cf_zone_managed_check_many "${ZONES_TO_PROCESS[@]}" 2>&1
+    )
+    RESULT=$?
+    if [[ $RESULT -eq 1 ]] && echo "$OUTPUT" | grep -q 'Domain is managed by the current account - example.com' && echo "$OUTPUT" | grep -q 'Unable to determine whether broken.example.com is managed by the current account'; then
+        _test_pass "Returns API failure when any zone lookup fails"
+    else
+        _test_fail "Returns API failure when any zone lookup fails" "exit 1 with one managed result and one API error" "exit $RESULT and $OUTPUT"
+    fi
+}
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
 echo "║             Managed Zone Helper Unit Tests                              ║"
@@ -137,6 +201,7 @@ echo "╚═══════════════════════�
 
 test_cf_zone_managed_info
 test_cf_print_zone_managed_result
+test_cf_zone_managed_check_many
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

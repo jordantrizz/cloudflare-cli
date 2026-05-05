@@ -342,6 +342,42 @@ function _cf_zone_managed_info () {
     return 0
 }
 
+# =====================================
+# -- _cf_zone_managed_check_many $ZONE...
+# -- Check managed status for multiple zones
+# -- Exit codes: 0 all managed, 2 at least one not managed, 1 any API/auth failure
+# =====================================
+cf_api_functions["_cf_zone_managed_check_many"]="Check managed status for multiple zones"
+function _cf_zone_managed_check_many () {
+    local ZONE
+    local RESULT_LINE
+    local LOOKUP_EXIT
+    local PRINT_HEADER=1
+    local OVERALL_EXIT=0
+
+    [[ $# -eq 0 ]] && _error "Missing zones to check" && return 1
+
+    for ZONE in "$@"; do
+        RESULT_LINE="$(_cf_zone_managed_info "$ZONE")"
+        LOOKUP_EXIT=$?
+
+        if [[ $LOOKUP_EXIT -eq 1 ]]; then
+            _error "Unable to determine whether $ZONE is managed by the current account"
+            OVERALL_EXIT=1
+            continue
+        fi
+
+        _cf_print_zone_managed_result "$RESULT_LINE" "$PRINT_HEADER"
+        PRINT_HEADER=0
+
+        if [[ $LOOKUP_EXIT -eq 2 ]] && [[ $OVERALL_EXIT -eq 0 ]]; then
+            OVERALL_EXIT=2
+        fi
+    done
+
+    return $OVERALL_EXIT
+}
+
 # ===================================
 # -- _cf_account_info $ACCOUNT_ID
 # -- Get account id, account name and admins

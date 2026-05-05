@@ -102,6 +102,8 @@ Additional Commands:
 
     check       - Activate check
 					managed <domain>
+					managed with -z <zone> [-z <zone> ...]
+					managed with -f <zones-file>
                     zone <zone>
 
     json        - Test jq_decode function
@@ -146,6 +148,7 @@ Enter \"cloudflare help\" to list available commands."
 # =====================================
 function _cf_print_zone_managed_result () {
 	local RESULT_LINE="$1"
+	local PRINT_HEADER="${2:-1}"
 	local DOMAIN
 	local MANAGED
 	local STATUS
@@ -154,7 +157,9 @@ function _cf_print_zone_managed_result () {
 	IFS=$'\t' read -r DOMAIN MANAGED STATUS ZONE_ID <<< "$RESULT_LINE"
 
 	if [[ ${CSV:-0} == "1" ]]; then
-		printf '%s\n' 'domain,managed,status,zone_id'
+		if [[ "$PRINT_HEADER" == "1" ]]; then
+			printf '%s\n' 'domain,managed,status,zone_id'
+		fi
 		printf '%s,%s,%s,%s\n' "$DOMAIN" "$MANAGED" "$STATUS" "$ZONE_ID"
 		return 0
 	fi
@@ -320,6 +325,8 @@ Additional Commands:
 
 	check       - Activate check
 					managed <domain>
+					managed with -z <zone> [-z <zone> ...]
+					managed with -f <zones-file>
 					zone <zone>
 
 	json        - Test jq_decode function

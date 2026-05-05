@@ -288,7 +288,7 @@ Usage: cloudflare check zone <zone>
 
 ```
 $ cloudflare check managed
-Usage: cloudflare check managed <domain>
+Usage: cloudflare [(-z <zone> [-z <zone> ...]) | (-f <zones-file>) | <domain>] check managed
 ```
 
 Check whether a domain is managed by the current Cloudflare account:
@@ -303,11 +303,21 @@ CSV output is available through the global `--csv` flag:
 cloudflare --csv check managed example.com
 ```
 
+You can also check multiple domains using the existing multi-zone inputs:
+
+```bash
+cloudflare -z example.com -z example.org check managed
+cloudflare -f zones.txt check managed
+cloudflare -f zones.txt --csv check managed
+```
+
 The CSV columns are:
 
 ```text
 domain,managed,status,zone_id
 ```
+
+When checking multiple domains with `--csv`, the command prints a single header row followed by one row per requested domain.
 
 
 ## REQUIREMENTS
