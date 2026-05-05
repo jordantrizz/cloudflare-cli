@@ -263,11 +263,17 @@ function _cf_zone_exists () {
 	local ZONE="$1"
 	
 	ZONE_ID=$(_cf_zone_id "$ZONE")
-	if [[ $? -ge 1 ]]; then
-		_die "Zone does not exist - $ZONE"		
-	else
-		_success "Zone exists - $ZONE"		
-	fi
+    case $? in
+    1)
+        _die "Unable to resolve zone ID for $ZONE"
+        ;;
+    2)
+        _die "Zone not found or token cannot access it - $ZONE (use -z with a Zone ID or grant Zone:Read)"
+        ;;
+    *)
+        _success "Zone exists - $ZONE"		
+        ;;
+    esac
 
 }
 
@@ -278,24 +284,25 @@ function _cf_zone_exists () {
 # =====================================
 cf_api_functions["_cf_zone_id"]="Get domain zoneid"
 function _cf_zone_id () {
-    DOMAIN_NAME=$1
+    local DOMAIN_NAME=$1
     [[ -z $DOMAIN_NAME ]] && _error "Missing domain name" && exit 1
     _debug "function:${FUNCNAME[0]}"
     _debug "Getting zone_id for ${DOMAIN_NAME}"
     cf_api GET /client/v4/zones?name=${DOMAIN_NAME}
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        ZONE_ID=$(echo $API_OUTPUT | jq -r '.result[0].id' )
+        local ZONE_ID
+        ZONE_ID=$(echo "$API_OUTPUT" | jq -r '.result[0].id' )
         if [[ $ZONE_ID != "null" ]]; then
             _debug "Zone ID: $ZONE_ID"
             echo $ZONE_ID
         else
-            _debug "Couldn't get ZoneID, using -z to provide ZoneID or give access read:zone access to your token"
-            _debug "$MESG - $AP_OUTPUT"
-            return 1
+            _debug "Cloudflare returned no matching accessible zone for ${DOMAIN_NAME}; use -z to provide a Zone ID or grant Zone:Read to your token"
+            _debug "$MESG - $API_OUTPUT"
+            return 2
         fi
     else
         _debug "Couldn't get ZoneID, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
-        _debug "$MESG - $AP_OUTPUT"
+        _debug "$MESG - $API_OUTPUT"
         return 1
     fi
 }

@@ -25,27 +25,52 @@ source "$SCRIPT_DIR/cf-inc-cf.sh"
 
 # -- Check options
 _debug "Checking for options"
+declare -a POSITIONAL_ARGS=()
 while [ -n "$1" ]
 do
 	case "$1" in
-		-E)	shift
-			CF_ACCOUNT=$1;;
-		-T)	shift
-			CF_TOKEN=$1;;
-		--test) shift
-			TEST=$1;;
+		-E)
+			shift
+			[ -z "$1" ] && _die "Usage: cloudflare -E <email>"
+			CF_ACCOUNT=$1
+			shift
+			continue
+			;;
+		-T)
+			shift
+			[ -z "$1" ] && _die "Usage: cloudflare -T <api_token>"
+			CF_TOKEN=$1
+			shift
+			continue
+			;;
+		--test)
+			shift
+			[ -z "$1" ] && _die "Usage: cloudflare --test <value>"
+			TEST=$1
+			shift
+			continue
+			;;
 		-D|--debug)
 			DEBUG=1
+			shift
+			continue
 			;;
 		-DF|--debug-file)
-			DEBUG_FILE=1			
+			DEBUG_FILE=1
+			shift
+			continue
 			;;
 		-DC|--debug-curl)
 			DEBUG=1
 			DEBUG_CURL_OUTPUT=1
+			shift
+			continue
 			;;
 		-d|--detail|--detailed|--details)
-			details=1;;
+			details=1
+			shift
+			continue
+			;;
 		-z|--zone)
 			shift
 			if [ -z "$1" ]; then
@@ -53,6 +78,8 @@ do
 			fi
 			CLI_ZONES+=("$1")
 			_debug "Added zone from CLI: $1"
+			shift
+			continue
 			;;
 		-f|--zones-file)
 			shift
@@ -61,13 +88,20 @@ do
 			fi
 			ZONES_FILE="$1"
 			_debug "Zones file specified: $ZONES_FILE"
+			shift
+			continue
 			;;
 		--continue-on-error)
 			MULTI_ZONE_CONTINUE_ON_ERROR=1
+			shift
+			continue
 			;;
 		-q|--quiet)
 			# TODO needs  to be re-implemmented
-			QUIET=1;;
+			QUIET=1
+			shift
+			continue
+			;;
 		-p|--profile)
 			shift
 			if [ -z "$1" ]; then
@@ -75,6 +109,8 @@ do
 			fi
 			API_PROFILE="$1"
 			_debug "Using profile: $API_PROFILE"
+			shift
+			continue
 			;;
 		-A|--account-id)
 			shift
@@ -83,21 +119,33 @@ do
 			fi
 			CLI_ACCOUNT_ID="$1"
 			_debug "Default account id specified: $CLI_ACCOUNT_ID"
+			shift
+			continue
 			;;
 		-y|--yes|--force)
 			FORCE_YES=1
+			shift
+			continue
 			;;
 		-h|--help)
 			help full
 			_die
 			;;
-		--)	shift
-			break;;
-		-*)	false;;
-		*)	break;;
+		--)
+			shift
+			while [ -n "$1" ]; do
+				POSITIONAL_ARGS+=("$1")
+				shift
+			done
+			break
+			;;
+		*)
+			POSITIONAL_ARGS+=("$1")
+			shift
+			;;
 	esac
-	shift
 done
+set -- "${POSITIONAL_ARGS[@]}"
 
 # -- Merge zones from CLI and file into ZONES_TO_PROCESS
 if [[ -n "$ZONES_FILE" ]]; then
