@@ -10,6 +10,7 @@ Options:
  --details, -d    Display detailed info where possible
  --debug, -D      Display API debugging info
  --quiet, -q      Less verbose
+ --table-only     Output only command data or final error line (script mode)
  -E <email>
  -T <api_token>
  -p, --profile    Use credentials profile NAME from ~/.cloudflare
@@ -23,6 +24,12 @@ Environment variables:
  CF_ACCOUNT  -  email address (as -E option)
  CF_TOKEN    -  API token (as -T option)
 Enter "cloudflare help" to list available commands.
+```
+
+Script mode example:
+
+```bash
+cloudflare -p CYBER --table-only list records example.com
 ```
 
 # Multi-Zone Operations

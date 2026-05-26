@@ -6,6 +6,15 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 API_METHOD=""
 API_PROFILE=""
 CSV=0
+TABLE_ONLY=0
+
+# Pre-scan CLI args so sourced files can honor --table-only during load.
+for _arg in "$@"; do
+	if [[ "$_arg" == "--table-only" ]]; then
+		TABLE_ONLY=1
+		break
+	fi
+done
 # Default account id for create-style commands (set via --account-id)
 CLI_ACCOUNT_ID=""
 # Multi-zone processing globals
@@ -105,6 +114,11 @@ do
 		-q|--quiet)
 			# TODO needs  to be re-implemmented
 			QUIET=1
+			shift
+			continue
+			;;
+		--table-only)
+			TABLE_ONLY=1
 			shift
 			continue
 			;;

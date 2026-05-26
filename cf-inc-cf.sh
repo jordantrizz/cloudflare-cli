@@ -13,6 +13,7 @@ DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 # Clear debug log
 echo "" > $DEBUG_FILE_PATH
 QUIET=0
+TABLE_ONLY="${TABLE_ONLY:-0}"
 NL=$'\n'
 TA=$'\t'
 CF_API_ENDPOINT=https://api.cloudflare.com/client/v4
@@ -34,6 +35,7 @@ HELP_OPTIONS="Options:
 	--debug, -D            Display API debugging info
 	--debug-curl, -DC      Display API debugging info and curl output
 	--quiet, -q            Less verbose
+	--table-only           Output only command data or final error line (script mode)
 	-y, --yes, --force     Skip confirmation prompts (e.g. when an existing record is found)
 	-E <email>             Cloudflare Email
 	-T <api_token>         Cloudflare API Token

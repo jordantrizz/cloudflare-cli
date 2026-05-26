@@ -10,7 +10,9 @@ API_LIB_VERSION="1.5"
 API_URL="https://api.cloudflare.com"
 DEBUG_CURL_OUTPUT="0"
 declare -a cf_api_functions
-echo "Cloudflare API Library v${API_LIB_VERSION}"
+if [[ ${TABLE_ONLY:-0} != "1" ]]; then
+    echo "Cloudflare API Library v${API_LIB_VERSION}"
+fi
 
 # =============================================================================
 # -- Core Functions
