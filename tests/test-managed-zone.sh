@@ -246,6 +246,31 @@ test_normalize_zone_input() {
     fi
 }
 
+test_validate_record_name_url_input() {
+    local OUTPUT
+    local RESULT
+
+    _test_section "Testing _validate_record_name() URL input handling"
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_validate_record_name "https://thecanadianbusinessdirectory.ca")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Accepts https URL record input"
+    else
+        _test_fail "Accepts https URL record input" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_validate_record_name "https://thecanadianbusinessdirectory.ca/")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Accepts URL record input with trailing slash"
+    else
+        _test_fail "Accepts URL record input with trailing slash" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+}
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
 echo "║             Managed Zone Helper Unit Tests                              ║"
@@ -255,6 +280,7 @@ test_cf_zone_managed_info
 test_cf_print_zone_managed_result
 test_cf_zone_managed_check_many
 test_normalize_zone_input
+test_validate_record_name_url_input
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

@@ -816,6 +816,23 @@ function _validate_record_name () {
     NORMALIZED="${NORMALIZED#${NORMALIZED%%[![:space:]]*}}"
     # Trim trailing whitespace
     NORMALIZED="${NORMALIZED%${NORMALIZED##*[![:space:]]}}"
+
+    # Accept URL-form input for CLI convenience.
+    NORMALIZED="${NORMALIZED#https://}"
+    NORMALIZED="${NORMALIZED#http://}"
+
+    # If a path/query/fragment is provided, keep the hostname portion only.
+    NORMALIZED="${NORMALIZED%%/*}"
+    NORMALIZED="${NORMALIZED%%\?*}"
+    NORMALIZED="${NORMALIZED%%\#*}"
+
+    # Drop optional port if present (e.g., example.com:443).
+    NORMALIZED="${NORMALIZED%%:*}"
+
+    while [[ $NORMALIZED == */ ]]; do
+        NORMALIZED="${NORMALIZED%/}"
+    done
+
     NORMALIZED="${NORMALIZED%.}"
 
     [[ -z $NORMALIZED ]] && _error "Record name cannot be empty" && return 1
