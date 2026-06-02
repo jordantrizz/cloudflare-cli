@@ -194,6 +194,58 @@ test_cf_zone_managed_check_many() {
     fi
 }
 
+test_normalize_zone_input() {
+    local OUTPUT
+    local RESULT
+
+    _test_section "Testing _normalize_zone_input()"
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_normalize_zone_input "https://thecanadianbusinessdirectory.ca")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Strips https:// prefix"
+    else
+        _test_fail "Strips https:// prefix" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_normalize_zone_input "http://thecanadianbusinessdirectory.ca")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Strips http:// prefix"
+    else
+        _test_fail "Strips http:// prefix" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_normalize_zone_input "https://www.thecanadianbusinessdirectory.ca")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Strips https://www. prefix"
+    else
+        _test_fail "Strips https://www. prefix" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_normalize_zone_input "http://www.thecanadianbusinessdirectory.ca")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Strips http://www. prefix"
+    else
+        _test_fail "Strips http://www. prefix" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+
+    ((TESTS_RUN++))
+    OUTPUT=$(_normalize_zone_input "https://thecanadianbusinessdirectory.ca/")
+    RESULT=$?
+    if [[ $RESULT -eq 0 ]] && [[ "$OUTPUT" == "thecanadianbusinessdirectory.ca" ]]; then
+        _test_pass "Strips trailing slash"
+    else
+        _test_fail "Strips trailing slash" "thecanadianbusinessdirectory.ca" "exit $RESULT and $OUTPUT"
+    fi
+}
+
 echo ""
 echo "╔═══════════════════════════════════════════════════════════════════════════╗"
 echo "║             Managed Zone Helper Unit Tests                              ║"
@@ -202,6 +254,7 @@ echo "╚═══════════════════════�
 test_cf_zone_managed_info
 test_cf_print_zone_managed_result
 test_cf_zone_managed_check_many
+test_normalize_zone_input
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

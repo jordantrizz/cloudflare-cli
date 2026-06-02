@@ -257,8 +257,8 @@ show|list)
 	records)
 		_pre_flight_check CF_
 		_loading "Running: cloudflare $CMD1 records $*"
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
-		CLI_ZONE="$1"
+		[ -z "$1" ] && _die "Usage: cloudflare $CMD1 records <zone>"
+		CLI_ZONE="$(_normalize_zone_input "$1")" || _die "Invalid zone input: $1"
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID="$(_cf_zone_id "$CLI_ZONE")"		
 

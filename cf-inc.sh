@@ -112,6 +112,33 @@ function _mask_sensitive() {
 }
 
 # =====================================
+# -- _normalize_zone_input $ZONE_INPUT
+# -- Normalize zone input from CLI
+# -- Strips protocol, optional www, and trailing slash(es)
+# =====================================
+function _normalize_zone_input () {
+    local RAW_ZONE="$1"
+    [[ -z $RAW_ZONE ]] && _error "Missing zone" && return 1
+
+    # Normalize case and trim leading/trailing whitespace.
+    local NORMALIZED="${RAW_ZONE,,}"
+    NORMALIZED="${NORMALIZED#${NORMALIZED%%[![:space:]]*}}"
+    NORMALIZED="${NORMALIZED%${NORMALIZED##*[![:space:]]}}"
+
+    NORMALIZED="${NORMALIZED#https://}"
+    NORMALIZED="${NORMALIZED#http://}"
+    NORMALIZED="${NORMALIZED#www.}"
+
+    while [[ $NORMALIZED == */ ]]; do
+        NORMALIZED="${NORMALIZED%/}"
+    done
+
+    [[ -z $NORMALIZED ]] && _error "Zone cannot be empty" && return 1
+
+    echo "$NORMALIZED"
+}
+
+# =====================================
 # -- _pre_flight_check
 # -- Check for .cloudflare credentials based on script
 # =====================================
