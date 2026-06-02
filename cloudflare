@@ -272,9 +272,14 @@ show|list)
 	# -- record (individual record by name)
 	record)
 		_pre_flight_check CF_
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
-		_loading "Getting record details for $1"
-		_cf_get_record_by_name "$1"
+		[ -z "$1" ] && _die "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
+		RAW_RECORD_INPUT="$1"
+		RECORD_NAME="$(_validate_record_name "$RAW_RECORD_INPUT")" || _die "Invalid record input: $RAW_RECORD_INPUT"
+		if [[ ${RAW_RECORD_INPUT,,} == http://* || ${RAW_RECORD_INPUT,,} == https://* ]]; then
+			_loading2 "Stripping URL input, using record name: $RECORD_NAME"
+		fi
+		_loading "Getting record details for $RECORD_NAME"
+		_cf_get_record_by_name "$RECORD_NAME"
 		;;
 
 	# -- access-rules
