@@ -331,7 +331,7 @@ When checking multiple domains with `--csv`, the command prints a single header 
 
 - bash 4.x
 - curl
-- php (php-cli) 5.x
+- jq
 
 
 ## DONATE
@@ -339,4 +339,3 @@ When checking multiple domains with `--csv`, the command prints a single header 
 Support me to improve cloudflare-cli
 
 <a href="https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=KAXRPGK8YBRVG"><img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" /></a>
-
