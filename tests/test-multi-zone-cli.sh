@@ -258,7 +258,9 @@ test_no_top_level_return() {
     hits=$(grep -nE '^[[:space:]]*return\b' "$CLI")
     _assert "No top-level return in cloudflare" "$([[ -z "$hits" ]] && echo 0 || echo 1)" "no matches" "$hits"
 
-    _assert "Multi-zone branches exit with MULTI_ZONE_RC" "$([[ $(grep -c 'exit "\$MULTI_ZONE_RC"' "$CLI") -eq 2 ]] && echo 0 || echo 1)" "2 exits" "$(grep -c 'exit "\$MULTI_ZONE_RC"' "$CLI")"
+    local exits
+    exits=$(grep -cF "exit \"\$MULTI_ZONE_RC\"" "$CLI")
+    _assert "Multi-zone branches exit with MULTI_ZONE_RC" "$([[ $exits -eq 2 ]] && echo 0 || echo 1)" "2 exits" "$exits"
 }
 
 # =============================================================================
