@@ -491,8 +491,14 @@ add)
 			_loading2 "Creating ${#ZONES_TO_PROCESS[@]} zone(s)${ACCOUNT_ID:+ under account $ACCOUNT_ID}"
 			echo -e "Zone\tID\tName Servers"
 			echo -e "----\t--\t------------"
+			# This entry point is a flat case dispatcher, not a function, so
+			# `return` here only prints "can only `return' from a function or
+			# sourced script" and lets execution fall through into the
+			# single-zone path below (empty DOMAIN -> usage error, exit 1).
+			# Exit with the real multi-zone status instead.
 			_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
-			return $?
+			MULTI_ZONE_RC=$?
+			exit "$MULTI_ZONE_RC"
 		fi
 
 		if [ -z "$DOMAIN" ]; then
@@ -569,6 +575,10 @@ bulk)
 					echo -e "Zone\tID\tName Servers"
 					echo -e "----\t--\t------------"
 					_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+					# Exit explicitly so the status never depends on this
+					# branch being the last statement in the dispatcher.
+					MULTI_ZONE_RC=$?
+					exit "$MULTI_ZONE_RC"
 					;;
 				*)
 					help bulk zone add
