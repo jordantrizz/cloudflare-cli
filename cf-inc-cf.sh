@@ -200,6 +200,9 @@ $ cloudflare -z extra.com -f zones.txt clear cache
 # Continue despite errors
 $ cloudflare -f zones.txt --continue-on-error clear cache
 
+# Exit status: 0 only when every zone succeeded, 1 on any failure or cancellation
+$ cloudflare -f zones.txt clear cache; echo \$?
+
 Zone Creation Examples:
 
 # Create one zone (prints assigned nameservers)
@@ -228,6 +231,7 @@ Examples:
 Notes:
 	- The output includes the nameservers you must set at your registrar.
 	- Use --continue-on-error to keep going after failures.
+	- Exit status is 0 only when every zone succeeded, 1 on any failure or cancellation.
 
 ${HELP_VERSION}"
 
@@ -353,6 +357,7 @@ Notes:
 	- Bulk mode uses one zone per line in zones.txt (comments with # allowed).
 	- The output includes the nameservers you must set at your registrar.
 	- Use --continue-on-error to keep going after failures.
+	- Exit status is 0 only when every zone succeeded, 1 on any failure or cancellation.
 
 ${HELP_VERSION}"
 

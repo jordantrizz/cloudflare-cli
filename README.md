@@ -65,6 +65,8 @@ cloudflare -f zones.txt add zone <account_id>
 
 The output includes the assigned Cloudflare nameservers per zone (these are the nameservers you update at your registrar).
 
+A multi-zone run exits `0` only when every zone succeeded. Any zone failure, or cancelling at the confirmation prompt, exits `1`, so `echo $?` tells you whether the batch is complete without parsing the output; per-zone detail is in the summary and the log file.
+
 ## Combine both methods
 ```bash
 cloudflare -z extra-zone.com -f zones.txt clear cache
