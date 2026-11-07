@@ -48,7 +48,7 @@ function _cf_bulkredirect_export() {
 
     # -- Export to CSV
     _loading "Exporting to CSV..."
-    _success "Done!"
+    ui_ok "Done!"
 }
 
 # -- Import
@@ -107,15 +107,18 @@ do
 			TEST=$1;;
 		-D|--debug)
             _loading "Debug mode enabled"
-			DEBUG=1;;
+			DEBUG=1
+			UI_VERBOSE=1;;
 		-DC|--debug-curl)
 			DEBUG=1
+			UI_VERBOSE=1
 			DEBUG_CURL_OUTPUT=2;;
 		-d|--detail|--detailed|--details)
 			details=1;;
 		-q|--quiet)
-			# TODO needs  to be re-implemmented
-			QUIET=1;;
+			# Human output is suppressed; errors and warnings still print.
+			QUIET=1
+			UI_QUIET=1;;
 		-h|--help)
 			_cf_bulkredirect_help
 			_die
@@ -132,6 +135,11 @@ done
 if [ -z "$1" ]; then
 	_cf_bulkredirect_help
 	_die "Missing arguments" 1
+fi
+
+# -- One banner per run; -q (UI_QUIET) suppresses it. stderr only.
+if [[ ${UI_QUIET:-0} != 1 ]]; then
+	ui_header "cf-bulkredirect"
 fi
 
 # -- Debug
@@ -183,3 +191,5 @@ case "$CMD1" in
         exit 1
         ;;
 esac
+
+ui_summary
