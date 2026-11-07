@@ -10,7 +10,7 @@ API_LIB_VERSION="1.5"
 API_URL="https://api.cloudflare.com"
 DEBUG_CURL_OUTPUT="0"
 declare -a cf_api_functions
-echo "Cloudflare API Library v${API_LIB_VERSION}"
+ui_debug "Cloudflare API Library v${API_LIB_VERSION}"
 
 # =============================================================================
 # -- Core Functions
@@ -2024,21 +2024,21 @@ function _multi_zone_summary() {
     echo "# Total: $TOTAL | Success: $SUCCESS | Failed: $FAILED | Skipped: $SKIPPED" >> "$MULTI_ZONE_LOG"
 
     echo ""
-    echo "========================================"
-    _loading "Multi-Zone Operation Summary"
-    echo "========================================"
-    echo "  Total zones:    $TOTAL"
+    ui_hr
+    ui_info "Multi-Zone Operation Summary"
+    ui_hr
+    ui_kv "Total zones:" "$TOTAL"
     _success "Succeeded:      $SUCCESS"
     [[ $FAILED -gt 0 ]] && _error "Failed:         $FAILED"
     [[ $SKIPPED -gt 0 ]] && _warning "Skipped:        $SKIPPED"
-    echo ""
-    
+    ui_info ""
+
     if [[ $FAILED -gt 0 ]]; then
         _error "Failed zones:"
         for zone in "${ZONES_FAILED[@]}"; do
-            echo "    - $zone"
+            ui_list "$zone"
         done
-        echo ""
+        ui_info ""
     fi
 
     _loading2 "Log file: $MULTI_ZONE_LOG"
@@ -2052,12 +2052,19 @@ cf_api_functions["_confirm_multi_zone"]="Confirm multi-zone operation"
 function _confirm_multi_zone() {
     local COUNT=${#ZONES_TO_PROCESS[@]}
     
-    echo ""
-    _warning "You are about to process $COUNT zone(s):"
-    printf '    %s\n' "${ZONES_TO_PROCESS[@]}"
-    echo ""
-    read -r -p "Proceed with operation? [y/N] " CONFIRM
-    [[ "$CONFIRM" =~ ^[Yy]$ ]] && return 0
+    ui_info ""
+    ui_warn "You are about to process $COUNT zone(s):"
+    ui_list "${ZONES_TO_PROCESS[@]}"
+    ui_info ""
+
+    # -y/UI_YES answers yes; a piped answer is honoured so scripted runs and the
+    # test harness can drive the prompt; empty stdin cancels.
+    if [[ ${UI_YES:-0} == 1 || ${FORCE_YES:-0} == 1 ]]; then
+        return 0
+    fi
+    local CONFIRM=""
+    read -r -p "Proceed with operation? [y/N] " CONFIRM || CONFIRM=""
+    [[ "$CONFIRM" =~ ^[Yy]([Ee][Ss])?$ ]] && return 0
     return 1
 }
 
@@ -2075,6 +2082,8 @@ function _process_multi_zone() {
 
     # Initialize logging
     _init_multi_zone_log
+
+    ui_section "Multi-zone"
 
     # Confirm before proceeding
     if ! _confirm_multi_zone; then
@@ -2111,6 +2120,7 @@ function _process_multi_zone() {
     done
 
     _multi_zone_summary
+    ui_summary
     [[ ${#ZONES_FAILED[@]} -gt 0 ]] && return 1
     return 0
 }

@@ -152,6 +152,11 @@ do
 done
 set -- "${POSITIONAL_ARGS[@]}"
 
+# -- One banner per run; -q (UI_QUIET) suppresses it. stderr only.
+if [[ ${UI_QUIET:-0} != 1 ]]; then
+	ui_header "cloudflare-cli" "v${VERSION}"
+fi
+
 # -- Merge zones from CLI and file into ZONES_TO_PROCESS
 if [[ -n "$ZONES_FILE" ]]; then
 	while IFS= read -r zone; do
@@ -355,8 +360,9 @@ add)
 		# -- Check for existing record and prompt to continue if found
 		if _cf_check_record_exists "$ZONE_ID" "$name" "$type"; then
 			if [[ "${FORCE_YES:-0}" != "1" ]]; then
-				read -r -p "A matching record already exists. Continue creating a new record? [y/N] " _confirm
-				[[ "${_confirm,,}" != "y" && "${_confirm,,}" != "yes" ]] && _die "Aborted by user."
+				if ! ui_confirm "A matching record already exists. Continue creating a new record?" n; then
+					_die "Aborted by user."
+				fi
 			else
 				_warning "Existing record found but --force/-y was specified, continuing."
 			fi
@@ -694,15 +700,11 @@ delete)
 		echo ""
 
 		_loading2 "Are you sure you want to delete zone $DOMAIN with ID $ZONE_ID?"
-		read -r -p "Continue? [y/N] " response
-		case "$response" in
-		[yY][eE][sS]|[yY]) 
+		if ui_confirm "Continue?" n; then
 			_debug "Continuing"
-			;;
-		*)
+		else
 			_die "Aborting"
-			;;
-		esac
+		fi
 		_loading2 "Deleting zone $DOMAIN with ID $ZONE_ID"
 		call_cf_v4 DELETE /zones/$ZONE_ID
 		;;
@@ -1238,19 +1240,15 @@ proxy)
 	fi
 
 	_loading2 "Record: $RECORD_FQDN ($RECORD_TYPE) -> currently proxied=$RECORD_PROXIED"
-	read -r -p "Do you want to $action this record? [y/N] " ANSWER
-	case "$ANSWER" in
-		[yY]|[yY][eE][sS])
-			_loading2 "Updating record to proxied=$target_proxied"
-			UPDATE_BODY='{"proxied":'"$target_proxied"'}'
-			cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
-			NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
-			_success "Record $RECORD_FQDN proxied=$NEW_STATE"
-			;;
-		*)
-			_loading2 "Aborted by user; no changes made."
-			;;
-	esac
+	if ui_confirm "Do you want to $action this record?" n; then
+		_loading2 "Updating record to proxied=$target_proxied"
+		UPDATE_BODY='{"proxied":'"$target_proxied"'}'
+		cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
+		NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
+		_success "Record $RECORD_FQDN proxied=$NEW_STATE"
+	else
+		_loading2 "Aborted by user; no changes made."
+	fi
 	;;
 
 # ----------------
