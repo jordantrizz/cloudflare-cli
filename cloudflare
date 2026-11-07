@@ -52,16 +52,19 @@ do
 			;;
 		-D|--debug)
 			DEBUG=1
+			UI_VERBOSE=1
 			shift
 			continue
 			;;
 		-DF|--debug-file)
 			DEBUG_FILE=1
+			UI_VERBOSE=1
 			shift
 			continue
 			;;
 		-DC|--debug-curl)
 			DEBUG=1
+			UI_VERBOSE=1
 			DEBUG_CURL_OUTPUT=1
 			shift
 			continue
@@ -97,8 +100,9 @@ do
 			continue
 			;;
 		-q|--quiet)
-			# TODO needs  to be re-implemmented
+			# Human output is suppressed; errors and warnings still print.
 			QUIET=1
+			UI_QUIET=1
 			shift
 			continue
 			;;
@@ -124,6 +128,7 @@ do
 			;;
 		-y|--yes|--force)
 			FORCE_YES=1
+			UI_YES=1
 			shift
 			continue
 			;;

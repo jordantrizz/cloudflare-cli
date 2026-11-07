@@ -95,6 +95,7 @@ _debug "ALL_ARGS: ${*}@"
         ;;
         -q|--quiet)
         QUIET="1"
+        UI_QUIET=1
         shift # past argument
         ;;
         --cf)
