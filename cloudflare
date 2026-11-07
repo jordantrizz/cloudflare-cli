@@ -247,7 +247,7 @@ show|list)
 	records)
 		_pre_flight_check CF_
 		_loading "Running: cloudflare $CMD1 records $*"
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
+		[ -z "$1" ] && ui_err "Usage: cloudflare $CMD1 records <zone>"
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID="$(_cf_zone_id "$CLI_ZONE")"		
@@ -262,7 +262,7 @@ show|list)
 	# -- record (individual record by name)
 	record)
 		_pre_flight_check CF_
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
+		[ -z "$1" ] && ui_err "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
 		_loading "Getting record details for $1"
 		_cf_get_record_by_name "$1"
 		;;
@@ -350,7 +350,7 @@ add)
 			fi
 		fi
 
-		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
+		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then ui_err "Can't proxy 127.0.0.0/8 using an A record"; fi
 		
 		_loading2 "Getting zone_id for $ZONE"
 		_cf_zone_exists "$ZONE"
@@ -364,7 +364,7 @@ add)
 					_die "Aborted by user."
 				fi
 			else
-				_warning "Existing record found but --force/-y was specified, continuing."
+				ui_warn "Existing record found but --force/-y was specified, continuing."
 			fi
 		fi
 
@@ -431,10 +431,10 @@ add)
 			_loading2 " -- Creating A record: $name $content $ttl $proxied"
 			cf_api POST /client/v4/zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
 			if [[ $? == 0 ]]; then
-				_success "Record created"
+				ui_ok "Record created"
 				echo $API_OUTPUT | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
 			else
-				_error "Error creating A record"
+				ui_err "Error creating A record"
 				echo "$API_OUTPUT"
 			fi
 			;;
@@ -520,7 +520,7 @@ add)
 		_loading2 "Checking if zone $DOMAIN already exists"		
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
 		if [[ -n "$ZONE_ID" ]]; then
-			_error "Zone $DOMAIN already exists with ID $ZONE_ID"
+			ui_err "Zone $DOMAIN already exists with ID $ZONE_ID"
 			exit 1
 		fi
 
@@ -543,7 +543,7 @@ add)
 		CREATE_ZONE_OUTPUT+=$CREATE_ZONE_OUTPUT_CMD
 		
 		
-		_success "Zone created" 
+		ui_ok "Zone created" 
 		echo -e "$CREATE_ZONE_OUTPUT" | column -t -s $'\t'
 		echo ""
 
@@ -691,7 +691,7 @@ delete)
 		# Confirm deletion
 		echo ""
 		echo "===================================================================="
-		_error "This will delete zone $DOMAIN with ID $ZONE_ID"		
+		ui_err "This will delete zone $DOMAIN with ID $ZONE_ID"		
 		DELETE_ZONE_ACCOUNT_DETAILS="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		DELETE_ZONE_ACCOUNT_DETAILS+="----\t------\t----\t--\t------------\t-------------------\n"
 		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
@@ -883,9 +883,9 @@ change|set)
 		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}" -- \
 			%"  ID: %s$NL  Name: %s$NL  Type: %s$NL  Content: %s$NL  TTL: %s$NL  Proxied: %s$NL" ,id,name,type,content,ttl,proxied
 		if [[ $? -eq 0 ]]; then
-			_success "Record updated successfully"
+			ui_ok "Record updated successfully"
 		else
-			_error "Failed to update record"
+			ui_err "Failed to update record"
 		fi
 		;;
 	*)
@@ -988,7 +988,7 @@ template)
 			help template
 			_die "Template file not found - templates/$TEMPLATE_NAME"
 		else
-			_success "Template file found - templates/$TEMPLATE_NAME"
+			ui_ok "Template file found - templates/$TEMPLATE_NAME"
 			TEMPLATE_FILE="templates/$TEMPLATE_NAME"
 		fi
 
@@ -1039,7 +1039,7 @@ template)
 		_loading2 "Checking for required variables"
 		for var in "${REQUIRED_VARIABLES[@]}"; do
 			if [ -z "${ARG_VARIABLES[$var]}" ]; then
-				_error "Error: Required variable '$var' is not defined."
+				ui_err "Error: Required variable '$var' is not defined."
 				exit 1
 			else
 				_loading3 " - Variable defined $var: ${ARG_VARIABLES[$var]}"
@@ -1245,7 +1245,7 @@ proxy)
 		UPDATE_BODY='{"proxied":'"$target_proxied"'}'
 		cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
 		NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
-		_success "Record $RECORD_FQDN proxied=$NEW_STATE"
+		ui_ok "Record $RECORD_FQDN proxied=$NEW_STATE"
 	else
 		_loading2 "Aborted by user; no changes made."
 	fi

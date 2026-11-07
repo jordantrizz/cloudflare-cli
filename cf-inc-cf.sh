@@ -1075,8 +1075,8 @@ function _cf_validate_record_priority () {
 # -- _check_quiet
 # ===============================================
 function _check_quiet () {
-    if [[ $QUIET == "1" ]]; then
-        echo -e "${CYAN}** DEBUG: Quiet is on${NC}"
+    if [[ ${QUIET:-0} == "1" ]]; then
+        ui_debug "Quiet is on"
     fi
 }
 
@@ -1165,7 +1165,7 @@ function call_cf_v4 () {
 			elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
 				CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"X-Auth-Email: ${API_ACCOUNT}\" -H \"X-Auth-Key: ${API_APIKEY}\" -X \"$METHOD\""
 			else
-				_error "No authentication credentials found"
+				ui_err "No authentication credentials found"
 				return 1
 			fi
 				# Grab each CURL_OPTS and add to CURL_CMD
@@ -1184,15 +1184,15 @@ function call_cf_v4 () {
 
 			# -- Check if curl failed
 			if [[ $CURL_EXIT_CODE -gt 0 ]]; then				
-				_error "curl failed - OUTPUT: $CURL_OUTPUT EXITCODE: $CURL_EXIT_CODE"
+				ui_err "curl failed - OUTPUT: $CURL_OUTPUT EXITCODE: $CURL_EXIT_CODE"
 				echo "$CURL_OUTPUT"				
 				exit 1
 			fi
 
 			# -- Check if Cloudflare returned an error
 			if [[ $(grep '^{"success":false' <<<"$CURL_OUTPUT") ]]; then
-				_error "Cloudflare returned an error"
-				_error "$CURL_OUTPUT"
+				ui_err "Cloudflare returned an error"
+				ui_err "$CURL_OUTPUT"
 				return 1
 			fi
 
@@ -1238,7 +1238,7 @@ function _cf_zone_create_v4 () {
 	local ZONE_ID
 	local NAME_SERVERS
 
-	[[ -z "$DOMAIN" ]] && _error "Missing zone name" && return 1
+	[[ -z "$DOMAIN" ]] && ui_err "Missing zone name" && return 1
 
 	if [[ -n "$ACCOUNT_ID" ]]; then
 		JSON="{\"account\":{\"id\":\"$ACCOUNT_ID\"},\"name\":\"$DOMAIN\",\"jump_start\":true}"
@@ -1357,7 +1357,7 @@ function _cf_check_record_exists () {
 	local RECORD_NAME="$2"
 	local RECORD_TYPE="$3"
 
-	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { _error "_cf_check_record_exists: missing arguments"; return 1; }
+	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { ui_err "_cf_check_record_exists: missing arguments"; return 1; }
 
 	_debug "Checking for existing ${RECORD_TYPE} record named ${RECORD_NAME} in zone ${ZONE_ID}"
 	cf_api GET "/client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}&type=${RECORD_TYPE}"
@@ -1375,7 +1375,7 @@ function _cf_check_record_exists () {
 		return 1
 	fi
 
-	_warning "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
+	ui_warn "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
 	printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "Type" "Name" "Content" "TTL" "Proxied" "Record ID"
 	printf "%s\n" "$(printf '%0.s-' {1..155})"
 	echo "$API_OUTPUT" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(.ttl)\t\(.proxied)\t\(.id)"' | while IFS=$'\t' read -r TYPE NAME CONTENT TTL PROXIED RID; do
@@ -1409,7 +1409,7 @@ function zone_search () {
 	elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
 		CURL_OUTPUT=$(curl -sS "${APIv4_ENDPOINT}/zones${QUERY_STRING}" -H "X-Auth-Email: ${API_ACCOUNT}" -H "X-Auth-Key: ${API_APIKEY}" -X GET)
 	else
-		_error "No authentication credentials found"
+		ui_err "No authentication credentials found"
 		return 1
 	fi
 	
@@ -1446,11 +1446,11 @@ function zone_search () {
 	_debug "Zones found count: $found_count"
 	
 	if [[ $SUCCESS == "1" ]]; then
-		_success "Found the following zones:"
+		ui_ok "Found the following zones:"
 		printf "%-40s | %-40s\n" "DomainID" "Domain"
 		printf "%s-+-%s\n" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..40})"
 		paste <(echo -e "$ZONE_IDS_FOUND") <(echo -e "$ZONES_FOUND") | column -t -s $'\t' | awk '{printf "%-40s | %-40s\n", $1, $2}'
 	else
-		_error "Zone not found - $QUERY"
+		ui_err "Zone not found - $QUERY"
 	fi
 }
