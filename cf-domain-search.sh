@@ -129,12 +129,13 @@ _debug "DEBUG: $DEBUG"
 [[ -n $1 ]] && DOMAIN="$1"
 
 # -- Check if argument is passed
-if [[ -z "$DOMAIN" && -z $DOMAIN_FILE ]]; then    
+if [[ $HELP ]]; then
+    usage
+    exit 0
+fi
+if [[ -z "$DOMAIN" && -z $DOMAIN_FILE ]]; then
     usage
     ui_err "No domain specified"
-    exit 1
-elif [[ $HELP ]]; then
-    usage
     exit 1
 fi
 
