@@ -1277,7 +1277,7 @@ check)
 # -- json command
 # ---------------
 json)	
-	_loading "Reading STDIN data and sending to jq_decode with args: ${@}"
+	_loading "Reading STDIN data and sending to jq_decode with args: ${*}"
 	JSON_FILE="$1"
 	shift
 	cat $JSON_FILE | jq_decode "${@}"	

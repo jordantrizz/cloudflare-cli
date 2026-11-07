@@ -288,10 +288,38 @@ Usage: cloudflare check zone <zone>
 ```
 
 
+## OUTPUT AND ENVIRONMENT
+
+Human output goes to stderr through the vendored
+[bash-ui](https://github.com/jordantrizz/bash-ui) library (v0.2.0), so the data on stdout
+stays pipeable: `cloudflare list zones | jq` works without stripping banners or colour.
+
+| Variable | Effect |
+|----------|--------|
+| `NO_COLOR` | Disable colour |
+| `UI_COLOR=auto\|always\|never` | Force or forbid colour (`auto` is the default) |
+| `UI_QUIET=1` | Suppress step/info/ok lines; warnings and errors still print (`-q`) |
+| `UI_VERBOSE=1` | Show debug lines (`-D`) |
+| `UI_ASCII=1` | ASCII symbols instead of UTF-8 |
+| `UI_YES=1` | Answer every confirmation with yes (`-y`) |
+| `BASH_UI` | Path to a bash-ui checkout to develop against |
+
+The library is vendored in `vendor/bash-ui/` with its checksum. Keep it current with:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/jordantrizz/bash-ui/main/scripts/bash-ui.sh) update
+```
+
+`cfddnsupdate` ships as a single file, so it carries an inlined copy between the
+`# >>> bash-ui 0.2.0 >>>` markers; CI verifies that copy with `inline --check`.
+
+
 ## REQUIREMENTS
 
-- bash 4.x
+- bash 4.2+ (4.0 and 4.1 run with plain-text output instead of the full theme)
 - curl
+- jq
+- column (util-linux)
 - php (php-cli) 5.x
 
 

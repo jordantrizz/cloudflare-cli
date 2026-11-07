@@ -1,0 +1,6 @@
+# ShellCheck configuration for cloudflare-cli.
+#
+# The vendored bash-ui library is resolved through the project tree, so a
+# `source` line can be followed with -x. The library itself is integrity
+# checked by its sha256 in CI, not linted here.
+source-path=vendor

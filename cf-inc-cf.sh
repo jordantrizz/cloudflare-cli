@@ -1204,7 +1204,7 @@ function call_cf_v4 () {
 				return 1
 			fi
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
-            _debug "\$@ == $@"
+            _debug "\$@ == $*"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
