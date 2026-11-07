@@ -22,7 +22,7 @@ ui_debug "Cloudflare API Library v${API_LIB_VERSION}"
 # =====================================
 cf_api_functions["_list_core_functions"]="List all core functions"
 function _list_core_functions () {
-    _loading "Listing all core functions with descriptions"
+    ui_section "Core functions"
 
     # Print header
     printf "%-40s | %-40s | %s\n" "Function" "Description" "Count"
@@ -51,20 +51,7 @@ function _list_core_functions () {
 # -- Cloudflare API Functions
 # =============================================================================
 
-# -----------------------------------------------------------------------------
-# Compatibility: some scripts use _running/_running2/_running3 message helpers.
-# Newer cf-inc.sh variants expose _loading/_loading2/_loading3 instead.
-# Define aliases when needed.
-# -----------------------------------------------------------------------------
-if ! declare -F _running >/dev/null 2>&1; then
-    _running() { _loading "$@"; }
-fi
-if ! declare -F _running2 >/dev/null 2>&1; then
-    _running2() { _loading2 "$@"; }
-fi
-if ! declare -F _running3 >/dev/null 2>&1; then
-    _running3() { _loading3 "$@"; }
-fi
+# Message helpers come from cf-inc.sh (ui_* through the deprecated adapters).
 
 # =====================================
 # -- cf_api <$REQUEST> <$API_PATH> [--paginate] [--all-pages] "${EXTRA[@]}"
@@ -140,7 +127,7 @@ function cf_api() {
         CURL_HEADERS=("-H" "X-Auth-Key: ${API_APIKEY}" -H "X-Auth-Email: ${API_ACCOUNT}")
         _debug "Using \$API_APIKEY as X-Auth-Key (key masked)"        
     else
-        _error "No API Token or API Key found...major error...exiting"
+        ui_err "No API Token or API Key found...major error...exiting"
         exit 1
     fi
 
@@ -180,7 +167,7 @@ function cf_api() {
         _debug "$API_OUTPUT"
 	else
         MESG="Error from API: $CURL_EXIT_CODE"
-        _error "$MESG"
+        ui_err "$MESG"
         parse_cf_error "$API_OUTPUT"
         exit 1
     fi
@@ -195,7 +182,7 @@ parse_cf_error () {
     _debug "Running parse_cf_error"
     ERROR_CODE=$(echo $API_OUTPUT | jq -r '.errors[0].code')
     ERROR_MESSAGE=$(echo $API_OUTPUT | jq -r '.errors[0].message')
-    _error "Error: $ERROR_CODE - $ERROR_MESSAGE"
+    ui_err "Error: $ERROR_CODE - $ERROR_MESSAGE"
 }
 
 # =====================================
@@ -223,15 +210,15 @@ function test_creds () {
         _loading "Testing credentials via CLI"
         cf_api GET /client/v4/user/tokens/verify
         API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
-        [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
+        [[ $CURL_EXIT_CODE == "200" ]] && ui_ok "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
     elif [[ -n $API_APIKEY ]]; then
         _debug "function:${FUNCNAME[0]}"
         _loading "Testing credentials via CLI"
         cf_api GET /client/v4/user
         API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
-        [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
+        [[ $CURL_EXIT_CODE == "200" ]] && ui_ok "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
     else
-        _error "No API Token or API Key found, exiting"
+        ui_err "No API Token or API Key found, exiting"
         exit 1
     fi
 }
@@ -245,7 +232,7 @@ function test-token () {
     _loading "Testing token via CLI"
     cf_api GET /client/v4/user/tokens/verify
     API_OUTPUT=$(echo $API_OUTPUT | jq '.messages[0].message' )
-    [[ $CURL_EXIT_CODE == "200" ]] && _success "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
+    [[ $CURL_EXIT_CODE == "200" ]] && ui_ok "Success from API: $CURL_EXIT_CODE - $API_OUTPUT"
 }
 
 # =============================================================================
@@ -271,7 +258,7 @@ function _cf_zone_exists () {
         _die "Zone not found or token cannot access it - $ZONE (use -z with a Zone ID or grant Zone:Read)"
         ;;
     *)
-        _success "Zone exists - $ZONE"		
+        ui_ok "Zone exists - $ZONE"		
         ;;
     esac
 
@@ -285,7 +272,7 @@ function _cf_zone_exists () {
 cf_api_functions["_cf_zone_id"]="Get domain zoneid"
 function _cf_zone_id () {
     local DOMAIN_NAME=$1
-    [[ -z $DOMAIN_NAME ]] && _error "Missing domain name" && exit 1
+    [[ -z $DOMAIN_NAME ]] && ui_err "Missing domain name" && exit 1
     _debug "function:${FUNCNAME[0]}"
     _debug "Getting zone_id for ${DOMAIN_NAME}"
     cf_api GET /client/v4/zones?name=${DOMAIN_NAME}
@@ -379,9 +366,9 @@ function _cf_zone_create () {
         DOMAIN_ID=$(echo $API_OUTPUT | jq -r '.result.id')
         # -- Name Servers are in an array, separate by ;
         NAME_SERVERS=$(echo $API_OUTPUT | jq -r '.result.name_servers[]' | tr '\n' ';')
-        _success "Zone $DOMAIN created with ID $DOMAIN_ID and Name Servers: $NAME_SERVERS"
+        ui_ok "Zone $DOMAIN created with ID $DOMAIN_ID and Name Servers: $NAME_SERVERS"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         return 1
     fi
 
@@ -389,7 +376,7 @@ function _cf_zone_create () {
     if [[ $SCAN == "true" ]]; then
         _cf_zone_scan $DOMAIN_ID
     else
-        _warning "Skipping zone scan"
+        ui_warn "Skipping zone scan"
     fi    
     _quiet "$DOMAIN,$DOMAIN_ID,$NAME_SERVERS,$SCAN"
     return 0
@@ -410,9 +397,9 @@ function _cf_zone_scan () {
     
     cf_api POST /client/v4/zones/$DOMAIN_ID/dns_records/scan
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Zone $DOMAIN_ID scanned"
+        ui_ok "Zone $DOMAIN_ID scanned"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         return 1
     fi
 }
@@ -445,27 +432,29 @@ function _cf_zone_create_bulk () {
     while IFS=, read -r DOMAIN ACCOUNT_ID SCAN; do
         # -- Check if line is blank
         if [[ -z $ACCOUNT_ID ]] || [[ -z $DOMAIN ]] || [[ -z $SCAN ]]; then
-            _warning "Blank line found in file"
+            ui_warn "Blank line found in file"
             continue
         fi
         _loading "Creating zone $DOMAIN for account $ACCOUNT_ID with scan $SCAN"
         _debug "DOMAIN: $DOMAIN - ACCOUNT_ID: $ACCOUNT_ID - SCAN: $SCAN"
         QUIET="1"
+        UI_QUIET=1
         CREATE_DATA="$(_cf_zone_create $ACCOUNT_ID $DOMAIN $SCAN)"
         CREATE_DATA_EXIT="$?"
         QUIET="0"
+        UI_QUIET=0
         if [[ $CREATE_DATA_EXIT -ne 0 ]]; then
-            _error "Error creating zone $DOMAIN"
+            ui_err "Error creating zone $DOMAIN"
             continue
         else
             BULK_OUTPUT+="$CREATE_DATA\n"
             COUNT=$((COUNT+1))
         fi
     done < $FILE
-    _success "Created $COUNT zones"
+    ui_ok "Created $COUNT zones"
     echo -e $BULK_OUTPUT
     echo -e $BULK_OUTPUT > $TMP_FILE
-    _success "Output written to $TMP_FILE"
+    ui_ok "Output written to $TMP_FILE"
 }
 
 
@@ -487,12 +476,12 @@ function _cf_zone_list() {
         ZONES=$(echo $API_OUTPUT | jq -r '.result[] | {id: .id, name: .name} | "\(.id) \(.name)"' | tr '\n' '\n')
         echo "$ZONES"
         if [[ $API_PAGES -gt 1 ]]; then
-            _warning "More pages found $API_PAGES, use --all-pages to get all zones"
+            ui_warn "More pages found $API_PAGES, use --all-pages to get all zones"
         else
-            _success "All zones listed"
+            ui_ok "All zones listed"
         fi
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -513,7 +502,7 @@ function _cf_zone_get () {
     elif [[ $PRINT == "full" ]]; then
         JQ_FILTER="jq"
     else
-        _error "Invalid print option"
+        ui_err "Invalid print option"
         exit 1
     fi
 
@@ -528,7 +517,7 @@ function _cf_zone_get () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT | eval "$JQ_FILTER"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -551,9 +540,9 @@ function _cf_zone_delete () {
 
     cf_api DELETE /client/v4/zones/$ZONE_ID
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Zone $ZONE_ID deleted"
+        ui_ok "Zone $ZONE_ID deleted"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -575,10 +564,10 @@ function _cf_zone_count_records () {
     cf_api GET /client/v4/zones/$ZONE_ID/dns_records
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         RECORD_COUNT=$(echo $API_OUTPUT | jq -r '.result_info.count')
-        _success "Total records: $RECORD_COUNT"
+        ui_ok "Total records: $RECORD_COUNT"
         _quiet "$RECORD_COUNT"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -599,7 +588,7 @@ function _cf_zone_records () {
         ZONE_NAME=$(echo $API_OUTPUT | jq -r '.result.name')
         _debug "Zone name: $ZONE_NAME"
     else
-        _error "Could not get zone name"
+        ui_err "Could not get zone name"
         ZONE_NAME="unknown"
     fi
     
@@ -634,9 +623,9 @@ function _cf_zone_records () {
         TOTAL_RECORDS=$(echo $API_OUTPUT | jq -r '.result_info.total_count')
         printf "\nTotal Records: %s\n" "$TOTAL_RECORDS"
         
-        _success "Records listed for zone: $ZONE_NAME"
+        ui_ok "Records listed for zone: $ZONE_NAME"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -669,27 +658,29 @@ function _cf_zone_count_records_bulk () {
     while IFS=, read -r DOMAIN; do
         # -- Check if line is blank
         if [[ -z $DOMAIN ]]; then
-            _warning "Blank line found in file"
+            ui_warn "Blank line found in file"
             continue
         fi
         _loading "Counting records for zone $DOMAIN"
         _debug "DOMAIN: $DOMAIN"
         QUIET="1"
+        UI_QUIET=1
         RECORD_COUNT="$(_cf_zone_count_records $DOMAIN)"
         RECORD_COUNT_EXIT="$?"
         QUIET="0"
+        UI_QUIET=0
         if [[ $RECORD_COUNT_EXIT -ne 0 ]]; then
-            _error "Error counting records for $DOMAIN"
+            ui_err "Error counting records for $DOMAIN"
             continue
         else
             BULK_OUTPUT+="$DOMAIN,$RECORD_COUNT\n"
             COUNT=$((COUNT+1))
         fi
     done < $FILE
-    _success "Counted records for $COUNT zones"
+    ui_ok "Counted records for $COUNT zones"
     echo -e $BULK_OUTPUT
     echo -e $BULK_OUTPUT > $TMP_FILE
-    _success "Output written to $TMP_FILE"
+    ui_ok "Output written to $TMP_FILE"
 }
 
 # =============================================================================
@@ -709,8 +700,8 @@ function _cf_record_info () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT | jq '.result'
     else
-        _error "Couldn't get Record Info, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
-        _error "$MESG - $AP_OUTPUT"
+        ui_err "Couldn't get Record Info, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
+        ui_err "$MESG - $AP_OUTPUT"
         exit 1
     fi
 }
@@ -731,10 +722,10 @@ function _cf_record_exists () {
 cf_api_functions["_validate_record_name"]="Validate DNS record name"
 function _validate_record_name () {
     local RAW_NAME="$1"
-    [[ -z $RAW_NAME ]] && _error "Missing record name" && return 1
+    [[ -z $RAW_NAME ]] && ui_err "Missing record name" && return 1
 
     if [[ $RAW_NAME =~ [[:space:]] ]]; then
-        _error "Record name cannot contain whitespace"
+        ui_err "Record name cannot contain whitespace"
         return 1
     fi
 
@@ -745,20 +736,20 @@ function _validate_record_name () {
     NORMALIZED="${NORMALIZED%${NORMALIZED##*[![:space:]]}}"
     NORMALIZED="${NORMALIZED%.}"
 
-    [[ -z $NORMALIZED ]] && _error "Record name cannot be empty" && return 1
-    [[ $NORMALIZED != *.* ]] && _error "Record name must include a zone (e.g., host.example.com)" && return 1
-    (( ${#NORMALIZED} > 253 )) && _error "Record name exceeds 253 characters" && return 1
+    [[ -z $NORMALIZED ]] && ui_err "Record name cannot be empty" && return 1
+    [[ $NORMALIZED != *.* ]] && ui_err "Record name must include a zone (e.g., host.example.com)" && return 1
+    (( ${#NORMALIZED} > 253 )) && ui_err "Record name exceeds 253 characters" && return 1
 
     IFS='.' read -r -a LABELS <<< "$NORMALIZED"
     for LABEL in "${LABELS[@]}"; do
-        [[ -z $LABEL ]] && _error "Record name contains empty label" && return 1
-        (( ${#LABEL} > 63 )) && _error "DNS label '$LABEL' exceeds 63 characters" && return 1
+        [[ -z $LABEL ]] && ui_err "Record name contains empty label" && return 1
+        (( ${#LABEL} > 63 )) && ui_err "DNS label '$LABEL' exceeds 63 characters" && return 1
         if [[ $LABEL == -* || $LABEL == *- ]]; then
-            _error "DNS label '$LABEL' cannot start or end with '-'"
+            ui_err "DNS label '$LABEL' cannot start or end with '-'"
             return 1
         fi
         if [[ ! $LABEL =~ ^[a-z0-9-]+$ ]]; then
-            _error "DNS label '$LABEL' has invalid characters"
+            ui_err "DNS label '$LABEL' has invalid characters"
             return 1
         fi
     done
@@ -773,7 +764,7 @@ function _validate_record_name () {
 cf_api_functions["_cf_derive_zone_from_record"]="Derive zone from record"
 function _cf_derive_zone_from_record () {
     local RECORD_NAME="$1"
-    [[ -z $RECORD_NAME ]] && _error "Missing record name" && return 1
+    [[ -z $RECORD_NAME ]] && ui_err "Missing record name" && return 1
 
     local NORMALIZED_NAME
     NORMALIZED_NAME=$(_validate_record_name "$RECORD_NAME") || return 1
@@ -791,7 +782,7 @@ function _cf_derive_zone_from_record () {
         CANDIDATE="$NEXT_CANDIDATE"
     done
 
-    _error "No managed zone found for $NORMALIZED_NAME"
+    ui_err "No managed zone found for $NORMALIZED_NAME"
     return 1
 }
 
@@ -804,13 +795,13 @@ function _cf_find_record_by_name () {
     local ZONE_ID="$1"
     local RECORD_NAME="$2"
 
-    [[ -z $ZONE_ID ]] && _error "Missing zone ID" && return 1
-    [[ -z $RECORD_NAME ]] && _error "Missing record name" && return 1
+    [[ -z $ZONE_ID ]] && ui_err "Missing zone ID" && return 1
+    [[ -z $RECORD_NAME ]] && ui_err "Missing record name" && return 1
 
     _debug "Searching for record $RECORD_NAME in zone $ZONE_ID"
     cf_api GET /client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}
     if [[ $CURL_EXIT_CODE != "200" ]]; then
-        _error "Failed to query DNS records for zone $ZONE_ID"
+        ui_err "Failed to query DNS records for zone $ZONE_ID"
         return 1
     fi
 
@@ -820,7 +811,7 @@ function _cf_find_record_by_name () {
     MATCH_COUNT=$(echo "$FILTERED_JSON" | jq 'length')
 
     if [[ $MATCH_COUNT -eq 0 ]]; then
-        _error "No A or CNAME records named $RECORD_NAME were found"
+        ui_err "No A or CNAME records named $RECORD_NAME were found"
         return 1
     fi
 
@@ -845,7 +836,7 @@ function _cf_find_record_by_name () {
                 SELECTED_RECORD_JSON=$(echo "$FILTERED_JSON" | jq ".[${INDEX}]")
                 break
             else
-                _warning "Invalid selection"
+                ui_warn "Invalid selection"
             fi
         done
     fi
@@ -861,21 +852,21 @@ cf_api_functions["_cf_get_record_by_name"]="Get DNS record details by name"
 function _cf_get_record_by_name () {
     local RECORD_INPUT="$1"
 
-    [[ -z $RECORD_INPUT ]] && _error "Missing record name" && return 1
+    [[ -z $RECORD_INPUT ]] && ui_err "Missing record name" && return 1
 
     local RECORD_NAME
     RECORD_NAME=$(_validate_record_name "$RECORD_INPUT") || return 1
 
     _debug "Deriving zone for record: $RECORD_NAME"
     local ZONE_DATA
-    ZONE_DATA=$(_cf_derive_zone_from_record "$RECORD_NAME") || { _error "Unable to find managed zone for $RECORD_NAME"; return 1; }
+    ZONE_DATA=$(_cf_derive_zone_from_record "$RECORD_NAME") || { ui_err "Unable to find managed zone for $RECORD_NAME"; return 1; }
     local ZONE ZONE_ID
     IFS='|' read -r ZONE ZONE_ID <<< "$ZONE_DATA"
 
     _debug "Found zone: $ZONE ($ZONE_ID) for record $RECORD_NAME"
     cf_api GET /client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}
     if [[ $CURL_EXIT_CODE != "200" ]]; then
-        _error "Failed to query DNS records for zone $ZONE_ID"
+        ui_err "Failed to query DNS records for zone $ZONE_ID"
         return 1
     fi
 
@@ -883,7 +874,7 @@ function _cf_get_record_by_name () {
     MATCH_COUNT=$(echo "$API_OUTPUT" | jq '.result | length')
 
     if [[ $MATCH_COUNT -eq 0 ]]; then
-        _error "No records found for $RECORD_NAME"
+        ui_err "No records found for $RECORD_NAME"
         return 1
     fi
 
@@ -939,7 +930,7 @@ _cf_zone_accountid() {
 
      cf_api GET /client/v4/zones?name=${DOMAIN_NAME}
     if [[ $CURL_EXIT_CODE != "200" ]]; then
-        _error "Couldn't get account id, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
+        ui_err "Couldn't get account id, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
         echo "$MESG - $AP_OUTPUT"
         exit 1
     fi
@@ -948,14 +939,14 @@ _cf_zone_accountid() {
     ACCOUNT_ID=$(echo $API_OUTPUT | jq -r '.result[].account.id' )
     _debug "Account ID: $ACCOUNT_ID"
     if [[ $ACCOUNT_ID == "null" ]]; then
-        _error "No account id found for ${DOMAIN_NAME}"
+        ui_err "No account id found for ${DOMAIN_NAME}"
         return 1
     else
         # -- Check if there are two accounts returned
         ACCOUNTS_RETURNED="$(echo "$ACCOUNT_ID" | wc -l)"
         _debug "Accounts Returned: $ACCOUNTS_RETURNED"
         if [[ $ACCOUNTS_RETURNED -gt 1 ]]; then
-            _warning "Found multiple accounts for $DOMAIN_NAME, use -aid to specify account id"
+            ui_warn "Found multiple accounts for $DOMAIN_NAME, use -aid to specify account id"
             # -- List each account with a number, account id and account name
             i=1
             echo "$ACCOUNT_ID" | while read -r ACCOUNT; do
@@ -1023,8 +1014,8 @@ function cf_create_filter_json() {
     -d "[$JSON]")
 
     if [[ $DRYRUN == "1" ]]; then
-        _dryrun "URL = ${CF_API_ENDPOINT}"
-        _dryrun "${EXTRA[@]}"
+        ui_info "DRYRUN: URL = ${CF_API_ENDPOINT}"
+        ui_info "DRYRUN: ${EXTRA[*]}"
     else
         # -- Create filter via cf_api
         cf_api POST /client/v4/zones/${ZONE_ID}/filters "${EXTRA[@]}"
@@ -1039,10 +1030,10 @@ function cf_create_filter_json() {
             # -- Duplicate filter found
             if [[ $CF_CREATE_FILTER_ERROR == "config duplicates an already existing config" ]]; then
                 CF_DUPLICATE_FILTER_ID=$( echo $CF_CREATE_FILTER_CURL | jq -r '.errors[] | "\(.meta.id)"')
-                _error "Duplicate ID: $CF_DUPLICATE_FILTER_ID. Please delete this ID first."
+                ui_err "Duplicate ID: $CF_DUPLICATE_FILTER_ID. Please delete this ID first."
                 return 1
             else
-                _error "$MESG - $API_OUTPUT"
+                ui_err "$MESG - $API_OUTPUT"
                 parse_cf_error "$API_OUTPUT"
                 return 1
             fi
@@ -1070,8 +1061,8 @@ function CF_CREATE_FILTER() {
 
 
 	if [[ $DRYRUN == "1" ]];then
-		_dryrun " ** DRYRUN: URL = ${CF_API_ENDPOINT}"
-		_dryrun " ** DRYRUN: expression = ${CF_EXPRESSION}"
+		ui_info "DRYRUN: URL = ${CF_API_ENDPOINT}"
+		ui_info "DRYRUN: expression = ${CF_EXPRESSION}"
 	else
 		# -- Create filter via cf_api
 		cf_api POST /client/v4/zones/${ZONE_ID}/filters "${EXTRA[@]}"
@@ -1086,10 +1077,10 @@ function CF_CREATE_FILTER() {
 			# -- Duplicate filter found
 			if [[ $CF_CREATE_FILTER_ERROR == "config duplicates an already existing config" ]]; then
 				CF_DUPLICATE_FILTER_ID=$( echo $CF_CREATE_FILTER_CURL | jq -r '.errors[] | "\(.meta.id)"')
-            	_error "Duplicate ID: $CF_DUPLICATE_FILTER_ID. Please delete this ID first."
+            	ui_err "Duplicate ID: $CF_DUPLICATE_FILTER_ID. Please delete this ID first."
 				return 1
 			else
-				_error "$MESG - $API_OUTPUT"
+				ui_err "$MESG - $API_OUTPUT"
 				parse_cf_error "$API_OUTPUT"
 		        return 1
 		    fi
@@ -1126,8 +1117,8 @@ function CF_CREATE_RULE () {
 
 
     if [[ $DRYRUN == "1" ]]; then
-        _dryrun "URL = ${CF_API_ENDPOINT}"
-		_dryrun "${EXTRA[@]}"
+        ui_info "DRYRUN: URL = ${CF_API_ENDPOINT}"
+		ui_info "DRYRUN: ${EXTRA[*]}"
     else
 		# -- Create filter via cf_api
 		cf_api POST /client/v4/zones/${ZONE_ID}/firewall/rules "${EXTRA[@]}"
@@ -1137,7 +1128,7 @@ function CF_CREATE_RULE () {
 			_debug "New Rule -- ${DESCRIPTION}: ${NEW_RULE}"
 			echo $NEW_RULE
 		else
-			_error "ERROR: $MESG - $API_OUTPUT"
+			ui_err "ERROR: $MESG - $API_OUTPUT"
 			exit 1
 		fi
 	fi
@@ -1153,20 +1144,20 @@ function cf_list_rules_action () {
     _loading "Listing all rules for ${DOMAIN}/${ZONE_ID}"
     cf_api GET /client/v4/zones/${ZONE_ID}/firewall/rules
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Success from API: $CURL_EXIT_CODE"
+        ui_ok "Success from API: $CURL_EXIT_CODE"
         # -- Get Total Rules
         TOTAL_RULES=$(echo $API_OUTPUT | jq -r '.result_info.total_count')
         if [[ $TOTAL_RULES == "0" ]]; then
-            _warning "No rules found for ${DOMAIN}/${ZONE_ID}"
+            ui_warn "No rules found for ${DOMAIN}/${ZONE_ID}"
         else
-            _success "Found Rules for ${DOMAIN}/${ZONE_ID} - Total Rules: $TOTAL_RULES"
+            ui_ok "Found Rules for ${DOMAIN}/${ZONE_ID} - Total Rules: $TOTAL_RULES"
             echo
             # -- Go through each rule and print out in numbered order
             echo $API_OUTPUT | jq -r '.result[] | "\(.id) \(.description)"' | awk '{print "#" NR, $0}'
 
         fi
     else
-        _error "Error from API: $CURL_EXIT_CODE"
+        ui_err "Error from API: $CURL_EXIT_CODE"
         parse_cf_error "$API_OUTPUT"
         exit 1
     fi
@@ -1184,7 +1175,7 @@ function cf_list_rules() {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1203,7 +1194,7 @@ function cf_get_rule() {
         # Print out each item and separate with an
         echo $API_OUTPUT
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1225,7 +1216,7 @@ function cf_delete_rules_action () {
 	# -- Loop through all rules and delete
 	ZONE_RULES_COUNT=$(echo $ZONE_RULES | jq -r '.result_info.count')
 	if [[ $ZONE_RULES_COUNT == "0" ]]; then
-		_error "No rules found for ${OBJECT}"
+		ui_err "No rules found for ${OBJECT}"
 		exit 1
 	else
 		# -- Print out rules
@@ -1242,7 +1233,7 @@ function cf_delete_rules_action () {
                 FILTER_ID=$(echo $ZONE_RULES | jq -r --arg RULE_ID "$RULE_ID" '.result[] | select(.id == $RULE_ID) | .filter.id')
                 cf_delete_filter $ZONE_ID $FILTER_ID
             done
-            _success "All rules deleted."
+            ui_ok "All rules deleted."
 		else
             # -- Loop through all rules
             _debug "Looping through rules to get filter ID's"
@@ -1286,7 +1277,7 @@ function cf_delete_rule_action () {
     # -- Check if rule exists
     RULE_EXISTS=$(cf_get_rule $ZONE_ID $RULE_ID)
     if [[ $? -ne 0 ]]; then
-        _error "Rule $RULE_ID doesn't exist on $OBJECT"
+        ui_err "Rule $RULE_ID doesn't exist on $OBJECT"
         return 1
     else
         # -- Get Rule Data, print and set variables
@@ -1323,9 +1314,9 @@ function cf_delete_rule () {
 	cf_api DELETE /client/v4/zones/${ZONE_ID}/firewall/rules/${RULE_ID}
 
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-		_success "Rule $RULE_ID deleted"
+		ui_ok "Rule $RULE_ID deleted"
 	else
-		_error "ERROR: $MESG - $API_OUTPUT"
+		ui_err "ERROR: $MESG - $API_OUTPUT"
 		exit 1
 	fi
 }
@@ -1344,20 +1335,20 @@ function cf_list_filters_action () {
 
     cf_api GET /client/v4/zones/${ZONE_ID}/filters
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Success from API: $CURL_EXIT_CODE"
+        ui_ok "Success from API: $CURL_EXIT_CODE"
         # -- Get Total Filters
         TOTAL_FILTERS=$(echo $API_OUTPUT | jq -r '.result_info.total_count')
         if [[ $TOTAL_FILTERS == "0" ]]; then
-            _warning "No filters found for ${DOMAIN_NAME}/${ZONE_ID}"
+            ui_warn "No filters found for ${DOMAIN_NAME}/${ZONE_ID}"
         else
-            _success "Found Filters for ${DOMAIN_NAME}/${ZONE_ID} - Total Filters: $TOTAL_FILTERS"
+            ui_ok "Found Filters for ${DOMAIN_NAME}/${ZONE_ID} - Total Filters: $TOTAL_FILTERS"
             echo
             # -- Go through each filter and print out in numbered order
         echo $API_OUTPUT | jq -r '.result[] | "\(.id) \(.expression) \(.paused)"' | \
         awk '{print "#" NR, $0"\n----------------------------------------"}'
         fi
     else
-        _error "Error from API: $CURL_EXIT_CODE"
+        ui_err "Error from API: $CURL_EXIT_CODE"
         parse_cf_error "$API_OUTPUT"
         exit 1
     fi
@@ -1375,7 +1366,7 @@ function CF_GET_FILTERS() {
 	if [[ $CURL_EXIT_CODE == "200" ]]; then
 		echo $API_OUTPUT
 	else
-		_error "ERROR: $MESG - $API_OUTPUT"
+		ui_err "ERROR: $MESG - $API_OUTPUT"
 		exit 1
 	fi
 }
@@ -1393,7 +1384,7 @@ function cf_list_filter () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1411,9 +1402,9 @@ function cf_delete_filter_action () {
     _loading2 "Deleting filter $FILTER_ID on $OBJECT"
     cf_delete_filter $ZONE_ID $FILTER_ID
     if [[ $? -eq 0 ]]; then
-        _success "Filter $FILTER_ID deleted"
+        ui_ok "Filter $FILTER_ID deleted"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1436,7 +1427,7 @@ function cf_delete_filters_action () {
     # -- Loop through all filters and delete
     ZONE_FILTERS_COUNT=$(echo $ZONE_FILTERS | jq -r '.result_info.count')
     if [[ $ZONE_FILTERS_COUNT == "0" ]]; then
-        _error "No filters found for $OBJECT"
+        ui_err "No filters found for $OBJECT"
         exit 1
     else
         # -- Print out filters
@@ -1462,7 +1453,7 @@ function cf_delete_filters_action () {
             case $yn in
                 [Yy]* )
                 DELETE_OUTPUT=$(cf_delete_filter $ZONE_ID $FILTER_ID_DELETE)
-                [[ $? -eq 0 ]] && _success "Filter $FILTER_ID_DELETE deleted"
+                [[ $? -eq 0 ]] && ui_ok "Filter $FILTER_ID_DELETE deleted"
                 ;;
                 [Nn]* ) exit;;
                 * ) echo "Please answer yes or no.";;
@@ -1484,9 +1475,9 @@ function cf_delete_filter () {
 
 	cf_api DELETE /client/v4/zones/${ZONE_ID}/filters/${FILTER_ID}
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-		_success "Filter $RULE_ID deleted"
+		ui_ok "Filter $RULE_ID deleted"
 	else
-		_error "ERROR: $MESG - $API_OUTPUT"
+		ui_err "ERROR: $MESG - $API_OUTPUT"
 		exit 1
 	fi
 }
@@ -1516,17 +1507,17 @@ function _cf_tenant_create () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         NEW_TENANT_ID=$(echo $API_OUTPUT | jq -r '.result.id')
         _debug "New Tenant Created -- Name: ${TENANT_NAME} ID: ${NEW_TENANT_ID}"
-        _success "Created Tenant: $NEW_TENANT_ID"
+        ui_ok "Created Tenant: $NEW_TENANT_ID"
         _quiet "$NEW_TENANT_ID"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 
     _loading2 "Getting tenant $NEW_TENANT_ID"
     CONFIRM_TENANT="$(_cf_tenant_get $NEW_TENANT_ID)"
-    [[ $? -ne 0 ]] && _error "Couldn't get tenant" && exit 1
-    _success "Tenant: $CONFIRM_TENANT"
+    [[ $? -ne 0 ]] && ui_err "Couldn't get tenant" && exit 1
+    ui_ok "Tenant: $CONFIRM_TENANT"
 
 }
 
@@ -1561,6 +1552,7 @@ function _cf_tenant_create_bulk () {
 
     # -- Each line is a company name
     QUIET="1"
+    UI_QUIET=1
     while IFS= read -r LINE; do
         _debug "Creating tenant - $LINE"        
         TENANT_ID="$(_cf_tenant_create "$LINE")"
@@ -1569,13 +1561,15 @@ function _cf_tenant_create_bulk () {
         COUNT=$((COUNT+1))
         sleep 1
     done < $FILE
-    # shellcheck disable=SC2034
+    # shellcheck disable=SC2034  # state flags read by the message helpers
     QUIET="0"
+    # shellcheck disable=SC2034
+    UI_QUIET=0
 
     _loading2 "Created $COUNT tenants"
     # -- Print out all tenants created into a file
     echo -e $TENANT_IDS_CREATED > $TMP_FILE
-    _success "Tenants created: $TMP_FILE"
+    ui_ok "Tenants created: $TMP_FILE"
 }
 
 # ===============================================
@@ -1586,7 +1580,7 @@ cf_api_functions["_cf_tenant_get"]="Get a tenant"
 function _cf_tenant_get () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
 
     # -- List Tenant
     _debug "Listing tenant"
@@ -1594,7 +1588,7 @@ function _cf_tenant_get () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT | jq -r '.result | "\(.id) \(.name)"'
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1614,7 +1608,7 @@ function _cf_tenant_list_all () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT | jq -r '.result[] | "\(.id) \(.name)"' | awk '{print "#" NR, $0}'        
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1627,16 +1621,16 @@ cf_api_functions["_cf_tenant_delete"]="Delete a tenant"
 function _cf_tenant_delete () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
 
     # -- Delete Tenant
     _debug "Deleting tenant"
     
     cf_api DELETE /client/v4/accounts/$TENANT_ID
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Deleted Tenant: $TENANT_ID"
+        ui_ok "Deleted Tenant: $TENANT_ID"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1649,7 +1643,7 @@ cf_api_functions["_cf_tenant_delete_bulk"]="Delete multiple tenants"
 function _cf_tenant_delete_bulk () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_IDS="${*}"
-    [[ -z $TENANT_IDS ]] && _error "Missing tenant IDs" && exit 1
+    [[ -z $TENANT_IDS ]] && ui_err "Missing tenant IDs" && exit 1
 
     # -- Break up tenants separated by , and put into array
     IFS=',' read -r -a TENANT_IDS <<< "$TENANT_IDS"
@@ -1666,7 +1660,7 @@ cf_api_functions["_cf_tenant_roles_get"]="Get tenant roles"
 function _cf_tenant_roles_get () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
 
     # -- Get Tenant Roles
     _debug "Getting tenant roles"
@@ -1674,7 +1668,7 @@ function _cf_tenant_roles_get () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         echo $API_OUTPUT | jq -r '.result[] | "\(.id) \(.name)"' | awk '{print "#" NR, $0}'
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1687,9 +1681,9 @@ cf_api_functions["_cf_tenant_access_add"]="Create a tenant access"
 function _cf_tenant_access_add () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" EMAIL="$2" ROLE="$3"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
-    [[ -z $EMAIL ]] && _error "Missing email" && exit 1
-    [[ -z $ROLE ]] && _error "Missing role" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
+    [[ -z $EMAIL ]] && ui_err "Missing email" && exit 1
+    [[ -z $ROLE ]] && ui_err "Missing role" && exit 1
 
     # -- Role Mapping
     # 05784afa30c1afe1440e79d9351c7430 - Administrator
@@ -1697,7 +1691,7 @@ function _cf_tenant_access_add () {
     if [[ $ROLE == "administrator" ]]; then
         ROLE_ID="05784afa30c1afe1440e79d9351c7430"
     else
-        _error "Invalid role"
+        ui_err "Invalid role"
         exit 1
     fi
 
@@ -1711,10 +1705,10 @@ function _cf_tenant_access_add () {
 
     cf_api POST /client/v4/accounts/$TENANT_ID/members "${EXTRA[@]}"
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "New Tenant Access Created"
+        ui_ok "New Tenant Access Created"
         echo $API_OUTPUT | jq -r '.result | "ID: \(.user.id) First Name: \(.user.first_name) Last Name: \(.user.last_name) Email: \(.user.email) 2FA: \(.two_factor_authentication_enabled) Status: \(.status)"'
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1727,7 +1721,7 @@ cf_api_functions["_cf_tenant_access_get"]="Get a tenant access"
 function _cf_tenant_access_get () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local $TENANT_ID="$1"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant access ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant access ID" && exit 1
 
     # -- Get Tenant Access
     _debug "Getting tenant access"
@@ -1736,9 +1730,9 @@ function _cf_tenant_access_get () {
         # -- Figure out how many members
         TOTAL_MEMBERS=$(echo $API_OUTPUT | jq -r '.result_info.total_count')
         if [[ $TOTAL_MEMBERS == "0" ]]; then
-            _warning "No members found for $TENANT_ID"
+            ui_warn "No members found for $TENANT_ID"
         else
-            _success "Found Members for $TENANT_ID - Total Members: $TOTAL_MEMBERS"
+            ui_ok "Found Members for $TENANT_ID - Total Members: $TOTAL_MEMBERS"
             echo
             # -- Go through each member and print out in numbered order
             # -- Get a list of ID's into an array
@@ -1757,7 +1751,7 @@ function _cf_tenant_access_get () {
             done
         fi
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1770,8 +1764,8 @@ cf_api_functions["_cf_tenant_access_get_member"]="Get a tenant access"
 function _cf_tenant_access_get_member () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local $TENANT_ID="$1" MEMBER_ID="$2"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
-    [[ -z $MEMBER_ID ]] && _error "Missing member ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
+    [[ -z $MEMBER_ID ]] && ui_err "Missing member ID" && exit 1
 
     # -- Get Tenant Access
     _debug "Getting tenant access"
@@ -1781,7 +1775,7 @@ function _cf_tenant_access_get_member () {
         echo "========================================"
         echo $API_OUTPUT | jq -r '.result | "ID: \(.user.id)\n First Name: \(.user.first_name)\n Last Name: \(.user.last_name)\n Email: \(.user.email)\n 2FA: \(.two_factor_authentication_enabled)\n Status: \(.status)"'
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1794,16 +1788,16 @@ cf_api_functions["_cf_tenant_access_delete"]="Delete a tenant access"
 function _cf_tenant_access_delete () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" MEMBER_ID="$2"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
-    [[ -z $MEMBER_ID ]] && _error "Missing member ID" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
+    [[ -z $MEMBER_ID ]] && ui_err "Missing member ID" && exit 1
 
     # -- Delete Tenant Access
     _debug "Deleting tenant access"
     cf_api DELETE /client/v4/accounts/$TENANT_ID/members/$MEMBER_ID
     if [[ $CURL_EXIT_CODE == "200" ]]; then
-        _success "Deleted Tenant Access: $MEMBER_ID"
+        ui_ok "Deleted Tenant Access: $MEMBER_ID"
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit 1
     fi
 }
@@ -1816,8 +1810,8 @@ cf_api_functions["_cf_get_member_id_from_email"]="Get member ID from email"
 function _cf_get_member_id_from_email () {
     _debug "function:${FUNCNAME[0]} - ${*}"
     local TENANT_ID="$1" EMAIL="$2"
-    [[ -z $TENANT_ID ]] && _error "Missing tenant ID" && exit 1
-    [[ -z $EMAIL ]] && _error "Missing email" && exit 1
+    [[ -z $TENANT_ID ]] && ui_err "Missing tenant ID" && exit 1
+    [[ -z $EMAIL ]] && ui_err "Missing email" && exit 1
 
     # -- Get Tenant Access
     _debug "Getting tenant access"
@@ -1826,13 +1820,13 @@ function _cf_get_member_id_from_email () {
         # -- Get member ID from email
         MEMBER_ID=$(echo $API_OUTPUT | jq -r --arg EMAIL "$EMAIL" '.result[] | select(.user.email == $EMAIL) | .id')
         if [[ -z $MEMBER_ID ]]; then
-            _error "No member found for $EMAIL"
+            ui_err "No member found for $EMAIL"
             exit 1
         else
             echo $MEMBER_ID
         fi
     else
-        _error "ERROR: $MESG - $API_OUTPUT"
+        ui_err "ERROR: $MESG - $API_OUTPUT"
         exit
     fi
 }
@@ -1902,7 +1896,7 @@ function _cf_list_turnstile () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         json2_keyval_array "$API_OUTPUT"
     else
-        _error "Couldn't get turnstile list, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
+        ui_err "Couldn't get turnstile list, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
         echo "$MESG - $API_OUTPUT"
         exit 1
     fi
@@ -1920,7 +1914,7 @@ function delete_turnstile () {
     if [[ $CURL_EXIT_CODE == "200" ]]; then
         _loading "Deleted turnstile $TURNSTILE_ID"
     else
-        _error "Couldn't delete turnstile, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
+        ui_err "Couldn't delete turnstile, curl exited with $CURL_EXIT_CODE, check your \$CF_TOKEN or -t to provide a token"
         echo "$MESG - $API_OUTPUT"
         exit 1
     fi
@@ -1946,9 +1940,9 @@ function _parse_zones_file() {
     local FILE="$1"
     local -a ZONES=()
 
-    [[ -z "$FILE" ]] && _error "Missing zones file argument" && return 1
-    [[ ! -f "$FILE" ]] && _error "Zones file not found: $FILE" && return 1
-    [[ ! -r "$FILE" ]] && _error "Zones file not readable: $FILE" && return 1
+    [[ -z "$FILE" ]] && ui_err "Missing zones file argument" && return 1
+    [[ ! -f "$FILE" ]] && ui_err "Zones file not found: $FILE" && return 1
+    [[ ! -r "$FILE" ]] && ui_err "Zones file not readable: $FILE" && return 1
 
     _debug "Parsing zones file: $FILE"
 
@@ -1964,7 +1958,7 @@ function _parse_zones_file() {
     done < "$FILE"
 
     if [[ ${#ZONES[@]} -eq 0 ]]; then
-        _error "No valid zones found in file: $FILE"
+        ui_err "No valid zones found in file: $FILE"
         return 1
     fi
 
@@ -2028,13 +2022,13 @@ function _multi_zone_summary() {
     ui_info "Multi-Zone Operation Summary"
     ui_hr
     ui_kv "Total zones:" "$TOTAL"
-    _success "Succeeded:      $SUCCESS"
-    [[ $FAILED -gt 0 ]] && _error "Failed:         $FAILED"
-    [[ $SKIPPED -gt 0 ]] && _warning "Skipped:        $SKIPPED"
+    ui_ok "Succeeded:      $SUCCESS"
+    [[ $FAILED -gt 0 ]] && ui_err "Failed:         $FAILED"
+    [[ $SKIPPED -gt 0 ]] && ui_warn "Skipped:        $SKIPPED"
     ui_info ""
 
     if [[ $FAILED -gt 0 ]]; then
-        _error "Failed zones:"
+        ui_err "Failed zones:"
         for zone in "${ZONES_FAILED[@]}"; do
             ui_list "$zone"
         done
@@ -2099,14 +2093,14 @@ function _process_multi_zone() {
         if "$ACTION_FUNC" "$ZONE" "${ACTION_ARGS[@]}"; then
             ZONES_SUCCESS+=("$ZONE")
             _log_zone_action "$ZONE" "$ACTION_FUNC" "SUCCESS" "Completed"
-            _success "Zone $ZONE processed successfully"
+            ui_ok "Zone $ZONE processed successfully"
         else
             ZONES_FAILED+=("$ZONE")
             _log_zone_action "$ZONE" "$ACTION_FUNC" "FAILED" "Error occurred"
-            _error "Zone $ZONE failed"
+            ui_err "Zone $ZONE failed"
             
             if [[ $MULTI_ZONE_CONTINUE_ON_ERROR -ne 1 ]]; then
-                _error "Stopping due to error. Use --continue-on-error to proceed despite failures."
+                ui_err "Stopping due to error. Use --continue-on-error to proceed despite failures."
                 _multi_zone_summary
                 return 1
             fi
