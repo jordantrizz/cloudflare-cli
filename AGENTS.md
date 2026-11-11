@@ -7,6 +7,7 @@
 * Human output goes through the vendored bash-ui library (`ui_*`, stderr). Data stays on stdout with `echo`/`printf`, so pipes keep working. Never write raw colour escapes or `tput` calls; `ui_style` is the only way to colour text.
 * `cf-inc.sh` is the single place that loads `vendor/bash-ui/ui.sh`, with `$BASH_UI` for development and plain `printf` stubs when the file is missing. Scripts that don't source `cf-inc.sh` carry the same loader or, for single-file deployments like `cfddnsupdate`, an inlined region between `# >>> bash-ui <version> >>>` and `# <<< bash-ui <<<`.
 * Every script stays clean under `shellcheck -x` (the full report, every severity), and CI fails on any finding. Fix a finding; suppress only with an inline `# shellcheck disable=SCXXXX  # reason` when the construct is deliberate (a file list split on purpose, a sed regex, a decoder template).
+* CI pins ShellCheck to `SHELLCHECK_VERSION` in `.github/workflows/ci.yml` and asserts the binary matches it, so a new release cannot turn a green build red on its own; bumping the pin is a deliberate change that re-runs the report.
 * Keep the vendored library current with `bash <(curl -fsSL https://raw.githubusercontent.com/jordantrizz/bash-ui/main/scripts/bash-ui.sh) update`; CI checks the checksum, the pinned version and the inlined region in `cfddnsupdate`.
 
 ## Structure

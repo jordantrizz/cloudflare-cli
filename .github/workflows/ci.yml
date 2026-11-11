@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned on purpose: a newer ShellCheck release can add findings to an unchanged
+  # tree and turn a green build red without a code change. Bumping it re-runs the report.
+  SHELLCHECK_VERSION: "0.11.0"
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -17,8 +22,14 @@ jobs:
 
       - name: Install shellcheck
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
+          url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "$url"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Check the shellcheck version
+        run: |
+          shellcheck --version | grep -qx "version: ${SHELLCHECK_VERSION}"
 
       - name: Syntax check
         run: |
@@ -75,7 +86,18 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq jq shellcheck
+          sudo apt-get install -y -qq jq
+
+      - name: Install shellcheck
+        run: |
+          url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" "$url"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-v${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Check the shellcheck version
+        run: |
+          shellcheck --version | grep -qx "version: ${SHELLCHECK_VERSION}"
 
       - name: Run the test suites
         run: |
