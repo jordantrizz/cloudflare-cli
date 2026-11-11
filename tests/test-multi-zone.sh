@@ -18,8 +18,9 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Global temp directory for tests - exported so subshells can access it
-export TEST_TMP_DIR=$(mktemp -d)
-trap "rm -rf $TEST_TMP_DIR" EXIT
+TEST_TMP_DIR=$(mktemp -d)
+export TEST_TMP_DIR
+trap 'rm -rf "$TEST_TMP_DIR"' EXIT
 
 # =============================================================================
 # Test Helpers
@@ -141,8 +142,7 @@ EOF
 
     # Test 6: Non-existent file
     ((TESTS_RUN++))
-    OUTPUT=$(_parse_zones_file "/nonexistent/file.txt" 2>&1)
-    if [[ $? -ne 0 ]]; then
+    if ! OUTPUT=$(_parse_zones_file "/nonexistent/file.txt" 2>&1); then
         _test_pass "Returns error for non-existent file"
     else
         _test_fail "Returns error for non-existent file" "error" "success"
@@ -152,8 +152,7 @@ EOF
     ((TESTS_RUN++))
     TMPFILE=$(mktemp)
     echo "" > "$TMPFILE"
-    OUTPUT=$(_parse_zones_file "$TMPFILE" 2>&1)
-    if [[ $? -ne 0 ]]; then
+    if ! OUTPUT=$(_parse_zones_file "$TMPFILE" 2>&1); then
         _test_pass "Returns error for empty file"
     else
         _test_fail "Returns error for empty file" "error" "success"
@@ -162,8 +161,7 @@ EOF
 
     # Test 8: Missing argument
     ((TESTS_RUN++))
-    OUTPUT=$(_parse_zones_file 2>&1)
-    if [[ $? -ne 0 ]]; then
+    if ! OUTPUT=$(_parse_zones_file 2>&1); then
         _test_pass "Returns error when no file argument provided"
     else
         _test_fail "Returns error when no file argument provided" "error" "success"
@@ -251,8 +249,7 @@ test_confirm_multi_zone() {
     # Test 1: Returns 1 (false) when user enters 'n'
     ((TESTS_RUN++))
     ZONES_TO_PROCESS=("example.com" "example.org")
-    echo "n" | _confirm_multi_zone > /dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
+    if ! echo "n" | _confirm_multi_zone > /dev/null 2>&1; then
         _test_pass "Returns false when user declines"
     else
         _test_fail "Returns false when user declines" "return 1" "return 0"
@@ -260,8 +257,7 @@ test_confirm_multi_zone() {
 
     # Test 2: Returns 0 (true) when user enters 'y'
     ((TESTS_RUN++))
-    echo "y" | _confirm_multi_zone > /dev/null 2>&1
-    if [[ $? -eq 0 ]]; then
+    if echo "y" | _confirm_multi_zone > /dev/null 2>&1; then
         _test_pass "Returns true when user confirms"
     else
         _test_fail "Returns true when user confirms" "return 0" "return 1"
@@ -312,11 +308,13 @@ test_multi_zone_summary() {
 # =============================================================================
 
 # Mock action function for testing - writes to temp file to track invocations
+# shellcheck disable=SC2329  # called by name through _process_multi_zone
 _mock_action_success() {
     echo "$1" >> "$TEST_TMP_DIR/mock_invocations.txt"
     return 0
 }
 
+# shellcheck disable=SC2329  # called by name through _process_multi_zone
 _mock_action_fail() {
     echo "$1" >> "$TEST_TMP_DIR/mock_invocations.txt"
     return 1

@@ -1,0 +1,10 @@
+# ShellCheck configuration for cloudflare-cli.
+#
+# Policy: findings are fixed, never excluded. A suppression is one inline
+# `# shellcheck disable=SCXXXX` with the reason on the same line, and there are
+# no repo-wide excludes here. CI runs the full report and fails on any finding.
+#
+# The vendored bash-ui library is resolved through the project tree, so a
+# `source` line can be followed with -x. The library itself is integrity
+# checked by its sha256 in CI, not linted here.
+source-path=vendor

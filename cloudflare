@@ -52,16 +52,19 @@ do
 			;;
 		-D|--debug)
 			DEBUG=1
+			UI_VERBOSE=1
 			shift
 			continue
 			;;
 		-DF|--debug-file)
 			DEBUG_FILE=1
+			UI_VERBOSE=1
 			shift
 			continue
 			;;
 		-DC|--debug-curl)
 			DEBUG=1
+			UI_VERBOSE=1
 			DEBUG_CURL_OUTPUT=1
 			shift
 			continue
@@ -97,8 +100,9 @@ do
 			continue
 			;;
 		-q|--quiet)
-			# TODO needs  to be re-implemmented
+			# Human output is suppressed; errors and warnings still print.
 			QUIET=1
+			UI_QUIET=1
 			shift
 			continue
 			;;
@@ -124,6 +128,7 @@ do
 			;;
 		-y|--yes|--force)
 			FORCE_YES=1
+			UI_YES=1
 			shift
 			continue
 			;;
@@ -146,6 +151,11 @@ do
 	esac
 done
 set -- "${POSITIONAL_ARGS[@]}"
+
+# -- One banner per run; -q (UI_QUIET) suppresses it. stderr only.
+if [[ ${UI_QUIET:-0} != 1 ]]; then
+	ui_header "cloudflare-cli" "v${VERSION}"
+fi
 
 # -- Merge zones from CLI and file into ZONES_TO_PROCESS
 if [[ -n "$ZONES_FILE" ]]; then
@@ -197,7 +207,7 @@ show|list)
 			_loading2 "Getting zone details for $DOMAIN with ID $ZONE_ID"
 			LIST_ZONE_OUTPUT="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 			LIST_ZONE_OUTPUT+="----\t------\t----\t--\t------------\t-------------------\n"
-			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+			LIST_ZONE_OUTPUT+=$(call_cf_v4 GET /zones/"$ZONE_ID" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
 			echo -e "$LIST_ZONE_OUTPUT" | column -t -s $'\t'
 		else
 			_die "No zone found for $DOMAIN"
@@ -209,7 +219,7 @@ show|list)
         # -- Max per page=1000 and max results = 2000
         # TODO figure out how to get all zones in one call, or warn there is more than 1000 and add an option for second set of results etc.
 		#call_cf_v4 GET /zones -- .result %"%s$TA%s$TA#%s$TA%s$TA%s$NL" ,name,status,id,original_name_servers,name_servers		
-		_cf_zone_list	
+		_cf_zone_list ""
 		;;
 
 	# -- settings
@@ -226,18 +236,19 @@ show|list)
 		fi
 
 		if [ "$details" = 1 ]; then		
+			# shellcheck disable=SC2016  # field template, expanded by the decoder
 			fieldspec=,id,value,'?editable?"Editable"?""','?modified_on?<",, mod: $modified_on"?""'
 		else
 			fieldspec=,id,value,\"\",\"\"
 		fi
-		call_cf_v4 GET /zones/$ZONE_ID/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
+		call_cf_v4 GET /zones/"$ZONE_ID"/settings -- .result %"%-30s %s$TA%s%s$NL" "$fieldspec"
 		;;
 
 	# -- records (all records for a zone)
 	records)
 		_pre_flight_check CF_
 		_loading "Running: cloudflare $CMD1 records $*"
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 records <zone>"
+		[ -z "$1" ] && ui_err "Usage: cloudflare $CMD1 records <zone>"
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID="$(_cf_zone_id "$CLI_ZONE")"		
@@ -252,7 +263,7 @@ show|list)
 	# -- record (individual record by name)
 	record)
 		_pre_flight_check CF_
-		[ -z "$1" ] && _error "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
+		[ -z "$1" ] && ui_err "Usage: cloudflare $CMD1 record <record_name> (e.g., test.example.com)"
 		_loading "Getting record details for $1"
 		_cf_get_record_by_name "$1"
 		;;
@@ -260,6 +271,7 @@ show|list)
 	# -- access-rules
 	access-rules|listing|listings|blocking|blockings)
 		_pre_flight_check CF_
+		# shellcheck disable=SC2016  # field template, expanded by the decoder
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result %"%s$TA%s$TA%s$TA# %s$NL" ',<$configuration["value"],mode,modified_on,notes'
 		;;
 	email-routing)
@@ -271,7 +283,8 @@ show|list)
 
 
 		#call_cf_v4 GET /zones/$ZONE_ID/email/routing --  %"%-30s %s$TA%s%s$NL" ',name,enabled,created,modified,status'
-		call_cf_v4 GET /zones/$ZONE_ID/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' 
+		# shellcheck disable=SC2016  # field template, expanded by the decoder
+		call_cf_v4 GET /zones/"$ZONE_ID"/email/routing -- .result '&<"name: $name"' '&<"status: $status"' '&<"created: $created"' '&<"modified: $modified"' '&<"enabled: $enabled"' 
 		
 		;;
 	# -- no command catchall
@@ -295,9 +308,54 @@ add)
 	shift
 	case "$CMD2" in
 	record)		
+		# -- Parse add-record options before anything that needs credentials
+		opt_ttl=''
+		opt_proxy=''
+		opt_ttl_set=0
+		opt_proxy_set=0
+		declare -a record_args=()
+		while [ $# -gt 0 ]; do
+			case "$1" in
+				--ttl|--ttl=*)
+					if [[ "$1" == --ttl=* ]]; then
+						opt_ttl="${1#*=}"
+						shift
+					else
+						[ $# -lt 2 ] && { help add record; _die "--ttl requires a value: auto or a number of seconds"; }
+						opt_ttl="$2"
+						shift 2
+					fi
+					opt_ttl_set=1
+					;;
+				--proxy|--proxy=*)
+					if [[ "$1" == --proxy=* ]]; then
+						opt_proxy="${1#*=}"
+						shift
+					else
+						[ $# -lt 2 ] && { help add record; _die "--proxy requires a value: yes or no"; }
+						opt_proxy="$2"
+						shift 2
+					fi
+					opt_proxy_set=1
+					;;
+				--)
+					shift
+					record_args+=("$@")
+					break
+					;;
+				-*)
+					help add record
+					_die "Unknown option '$1' for add record"
+					;;
+				*)
+					record_args+=("$1")
+					shift
+					;;
+			esac
+		done
+		set -- "${record_args[@]}"
+
 		[ $# -lt 4 ] && { help add record;_die "Missing arguments - $CMD_ALL"; }
-		_pre_flight_check CF_
-		_debug "Running with API_METHOD: $API_METHOD"
 		ZONE=$1
 		shift
 		type=${1^^}
@@ -305,31 +363,57 @@ add)
 		name=$1
 		shift
 		content=$1
-		ttl=$2
+		shift
 		type_upper="${type^^}"
-		if [[ "$type" == "A" ]] || [[ "$type" == "CNAME" ]]; then
-			proxied=$3
-		elif [[ "$type" == "MX" ]] || [[ "$type" == "SRV" ]]; then
-			prio=$3
-		fi
-		service=$4
-		protocol=$5
-		weight=$6
-		port=$7
 
-		normalized_ttl=$(_cf_normalize_record_ttl "$ttl") || {
+		# -- Positional arguments after <content> are type-specific
+		case "$type_upper" in
+		MX)
+			prio=$1; shift || true
+			;;
+		SRV)
+			prio=$1; shift || true
+			service=$1; shift || true
+			protocol=$1; shift || true
+			weight=$1; shift || true
+			port=$1; shift || true
+			;;
+		esac
+
+		if [ $# -gt 0 ]; then
 			help add record
-			_die "Invalid ttl '$ttl'. ttl must be a number or 'auto'."
-		}
-		ttl="$normalized_ttl"
+			_die "Unexpected argument '$1'. Use --ttl and --proxy for TTL and proxying."
+		fi
 
-		if [[ "$type_upper" == "A" || "$type_upper" == "CNAME" ]]; then
-			[ -n "$proxied" ] || proxied=true
-			if ! _cf_is_boolean "$proxied"; then
-				help add record
-				_die "Invalid proxied '$proxied' for $type_upper record. Use true or false."
+		# -- TTL: flag, terminal prompt, or auto when it cannot prompt
+		if [[ $opt_ttl_set -eq 1 ]]; then
+			ttl_input="$opt_ttl"
+		elif _cf_prompt_enabled; then
+			ttl_input=$(_cf_prompt_record_ttl auto)
+		else
+			ttl_input='auto'
+		fi
+		ttl=$(_cf_normalize_record_ttl "$ttl_input") || {
+			help add record
+			_die "Invalid ttl '$ttl_input'. ttl must be a number or 'auto'."
+		}
+
+		# -- Proxying only exists for A, AAAA and CNAME records
+		proxied=''
+		if [[ "$type_upper" == "A" || "$type_upper" == "AAAA" || "$type_upper" == "CNAME" ]]; then
+			if [[ $opt_proxy_set -eq 1 ]]; then
+				proxy_input="$opt_proxy"
+			elif _cf_prompt_enabled; then
+				proxy_input=$(_cf_prompt_record_proxy yes)
+			else
+				proxy_input='yes'
 			fi
-			proxied="${proxied,,}"
+			proxied=$(_cf_normalize_proxy "$proxy_input") || {
+				help add record
+				_die "Invalid proxy '$proxy_input' for $type_upper record. Use yes or no."
+			}
+		elif [[ $opt_proxy_set -eq 1 ]]; then
+			ui_warn "--proxy is ignored for $type_upper records; Cloudflare only proxies A, AAAA and CNAME."
 		fi
 
 		if [[ "$type_upper" == "MX" || "$type_upper" == "SRV" ]]; then
@@ -340,8 +424,10 @@ add)
 			fi
 		fi
 
-		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then _error "Can't proxy 127.0.0.0/8 using an A record"; fi
+		if [[ $content =~ ^127.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] && [[ "$type" == "A" ]]; then ui_err "Can't proxy 127.0.0.0/8 using an A record"; fi
 		
+		_pre_flight_check CF_
+		_debug "Running with API_METHOD: $API_METHOD"
 		_loading2 "Getting zone_id for $ZONE"
 		_cf_zone_exists "$ZONE"
 		ZONE_ID="$(_cf_zone_id "$ZONE")"
@@ -350,10 +436,11 @@ add)
 		# -- Check for existing record and prompt to continue if found
 		if _cf_check_record_exists "$ZONE_ID" "$name" "$type"; then
 			if [[ "${FORCE_YES:-0}" != "1" ]]; then
-				read -r -p "A matching record already exists. Continue creating a new record? [y/N] " _confirm
-				[[ "${_confirm,,}" != "y" && "${_confirm,,}" != "yes" ]] && _die "Aborted by user."
+				if ! ui_confirm "A matching record already exists. Continue creating a new record?" n; then
+					_die "Aborted by user."
+				fi
 			else
-				_warning "Existing record found but --force/-y was specified, continuing."
+				ui_warn "Existing record found but --force/-y was specified, continuing."
 			fi
 		fi
 
@@ -363,17 +450,13 @@ add)
 		case "$type" in
 		MX)
 			_loading2 " -- Creating MX record: $name $content $ttl $prio"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":\"$ttl\",\"priority\":$prio}")
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"priority\":$prio}")
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'			
 			;;
 		LOC)
 			locdata=''
-			data_separated=1
-			if [ -n "${content//[! ]/}" ]
-			then
-				data_separated=0
-				set -- $content
-			fi
+			# shellcheck disable=SC2086  # LOC content is a space-separated field list
+			set -- $content
 			for key in lat_degrees lat_minutes lat_seconds lat_direction \
 			  long_degrees long_minutes long_seconds long_direction \
 			  altitude size precision_horz precision_vert
@@ -383,12 +466,8 @@ add)
 				locdata="$locdata${locdata:+,}\"$key\":\"$value\""
 				shift
 			done
-			if [ $data_separated = 1 ]
-			then
-				ttl=${1:-1}
-			fi
 			_loading2 " -- Creating LOC record: $name $content $ttl"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}")
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"ttl\":$ttl,\"name\":\"$name\",\"data\":{$locdata}}")
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 		SRV)
@@ -397,7 +476,7 @@ add)
 			[ -n "$weight" ] || weight=1
 			target=$content
 
-			call_cf_v4 POST /zones/$ZONE_ID/dns_records "{
+			call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{
 				\"type\":\"$type\",
 				\"ttl\":$ttl,
 				\"data\":{
@@ -413,30 +492,29 @@ add)
 			;;
 		TXT)
 			_loading2 " -- Creating TXT record: $name $content $ttl"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
-		A)
-			_loading2 " -- Creating A record: $name $content $ttl $proxied"
-			cf_api POST /client/v4/zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"
-			if [[ $? == 0 ]]; then
-				_success "Record created"
-				echo $API_OUTPUT | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
+		A|AAAA)
+			_loading2 " -- Creating $type record: $name $content $ttl $proxied"
+			if cf_api POST /client/v4/zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}"; then
+				ui_ok "Record created"
+				echo "$API_OUTPUT" | jq -r '.result | "\(.id)\t\(.zone_name)\t\(.name)\t\(.type)\t\(.content)\t\(.proxiable)\t\(.proxied)\t\(.ttl)"' | column -t -s $'\t'
 			else
-				_error "Error creating A record"
+				ui_err "Error creating $type record"
 				echo "$API_OUTPUT"
 			fi
 			;;
 		CNAME)
 			_loading2 " -- Creating CNAME record: $name $content $ttl $proxied"
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl,\"proxied\":$proxied}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 			;;
 
 		*)  
 			_loading2 " -- Creating record: $name $content $ttl"
 			#  ,id,zone_name,name,type,content,proxiable,proxied,ttl			
-			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/$ZONE_ID/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
+			RECORD_CREATE_OUTPUT+=$(call_cf_v4 POST /zones/"$ZONE_ID"/dns_records "{\"type\":\"$type\",\"name\":\"$name\",\"content\":\"$content\",\"ttl\":$ttl}" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,id,zone_name,name,type,content,proxiable,proxied,ttl)
 			echo -e "$RECORD_CREATE_OUTPUT" | column -t -s $'\t'
 
 			;;
@@ -465,9 +543,9 @@ add)
 		then
 			trg_type=country
 		fi
-		[ -z "$trg" -o -z "$trg_type" ] && _die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
+		[[ -z $trg || -z $trg_type ]] && _die "Usage: cloudflare add [<whitelist | blacklist | challenge>] [<IP | IP/mask | country_code>] [note]"
 
-		call_cf_v4 POST /user/firewall/access_rules/rules mode=$mode configuration[target]="$trg_type" configuration[value]="$trg" notes="$notes"
+		call_cf_v4 POST /user/firewall/access_rules/rules mode="$mode" "configuration[target]=$trg_type" "configuration[value]=$trg" notes="$notes"
 		;;
 
 	zone)		
@@ -491,8 +569,14 @@ add)
 			_loading2 "Creating ${#ZONES_TO_PROCESS[@]} zone(s)${ACCOUNT_ID:+ under account $ACCOUNT_ID}"
 			echo -e "Zone\tID\tName Servers"
 			echo -e "----\t--\t------------"
+			# This entry point is a flat case dispatcher, not a function, so
+			# `return` here only prints "can only `return' from a function or
+			# sourced script" and lets execution fall through into the
+			# single-zone path below (empty DOMAIN -> usage error, exit 1).
+			# Exit with the real multi-zone status instead.
 			_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
-			return $?
+			MULTI_ZONE_RC=$?
+			exit "$MULTI_ZONE_RC"
 		fi
 
 		if [ -z "$DOMAIN" ]; then
@@ -503,7 +587,7 @@ add)
 		_loading2 "Checking if zone $DOMAIN already exists"		
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
 		if [[ -n "$ZONE_ID" ]]; then
-			_error "Zone $DOMAIN already exists with ID $ZONE_ID"
+			ui_err "Zone $DOMAIN already exists with ID $ZONE_ID"
 			exit 1
 		fi
 
@@ -526,7 +610,7 @@ add)
 		CREATE_ZONE_OUTPUT+=$CREATE_ZONE_OUTPUT_CMD
 		
 		
-		_success "Zone created" 
+		ui_ok "Zone created" 
 		echo -e "$CREATE_ZONE_OUTPUT" | column -t -s $'\t'
 		echo ""
 
@@ -569,6 +653,10 @@ bulk)
 					echo -e "Zone\tID\tName Servers"
 					echo -e "----\t--\t------------"
 					_process_multi_zone _cf_zone_create_v4 "$ACCOUNT_ID"
+					# Exit explicitly so the status never depends on this
+					# branch being the last statement in the dispatcher.
+					MULTI_ZONE_RC=$?
+					exit "$MULTI_ZONE_RC"
 					;;
 				*)
 					help bulk zone add
@@ -634,17 +722,17 @@ delete)
 			esac
 		fi
 
-		call_cf_v4 DELETE /zones/$ZONE_ID/dns_records/$record_id
+		call_cf_v4 DELETE /zones/"$ZONE_ID"/dns_records/"$record_id"
 		;;
 
 	listing)
 		_pre_flight_check CF_
 		[ -z "$1" ] && _die "Usage: cloudflare delete listing [<IP | IP range | country code | ID | note fragment>] [first]"
 		call_cf_v4 GET /user/firewall/access_rules/rules -- .result ,id,configuration.value,notes |\
-		while read ruleid trg notes; do
-			if [ "$ruleid" = "$1" -o "$trg" = "$1" ] || grep -qF "$1" <<<"$notes"
+		while read -r ruleid trg notes; do
+			if [[ $ruleid == "$1" || $trg == "$1" ]] || grep -qF "$1" <<<"$notes"
 			then
-				call_cf_v4 DELETE /user/firewall/access_rules/rules/$ruleid
+				call_cf_v4 DELETE /user/firewall/access_rules/rules/"$ruleid"
 				if [ "$2" = first ]
 				then
 					break
@@ -670,26 +758,22 @@ delete)
 		# Confirm deletion
 		echo ""
 		echo "===================================================================="
-		_error "This will delete zone $DOMAIN with ID $ZONE_ID"		
+		ui_err "This will delete zone $DOMAIN with ID $ZONE_ID"		
 		DELETE_ZONE_ACCOUNT_DETAILS="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		DELETE_ZONE_ACCOUNT_DETAILS+="----\t------\t----\t--\t------------\t-------------------\n"
-		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/$ZONE_ID -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		DELETE_ZONE_ACCOUNT_DETAILS+=$(call_cf_v4 GET /zones/"$ZONE_ID" -- %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
 		echo -e "$DELETE_ZONE_ACCOUNT_DETAILS" | column -t -s $'\t'
 		echo "===================================================================="
 		echo ""
 
 		_loading2 "Are you sure you want to delete zone $DOMAIN with ID $ZONE_ID?"
-		read -r -p "Continue? [y/N] " response
-		case "$response" in
-		[yY][eE][sS]|[yY]) 
+		if ui_confirm "Continue?" n; then
 			_debug "Continuing"
-			;;
-		*)
+		else
 			_die "Aborting"
-			;;
-		esac
+		fi
 		_loading2 "Deleting zone $DOMAIN with ID $ZONE_ID"
-		call_cf_v4 DELETE /zones/$ZONE_ID
+		call_cf_v4 DELETE /zones/"$ZONE_ID"
 		;;
 
 	*)
@@ -713,7 +797,7 @@ change|set)
 		[ -z "$2" ] && { help change; _die "Missing arguments"; }
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
-		ZONE_ID="$(_cf_zone_id $CLI_ZONE)"		
+		ZONE_ID="$(_cf_zone_id "$CLI_ZONE")"		
 		shift
 		setting_items=''
 
@@ -738,7 +822,6 @@ change|set)
 			else
 				help change
 				_die "Error: Setting '$setting' is not a valid setting"
-				exit 1
 			fi
 			setting_value=$1
 			shift
@@ -750,7 +833,7 @@ change|set)
 				js=off
 				for s in ${setting_value//,/ }; do
 					case "$s" in
-					css|html|js) eval $s=on;;
+					css|html|js) eval "$s"=on;;
 					*) _die "E.g: cloudflare $CMD1 zone <zone> minify css,html,js"
 					esac
 				done
@@ -764,7 +847,7 @@ change|set)
 			setting_items="$setting_items${setting_items:+,}{\"id\":\"$setting\",\"value\":$setting_value}"
 		done
 
-		call_cf_v4 PATCH /zones/$ZONE_ID/settings "{\"items\":[$setting_items]}"
+		call_cf_v4 PATCH /zones/"$ZONE_ID"/settings "{\"items\":[$setting_items]}"
 		if [[ $? != 1 ]]; then
 			echo " -- $CURL_OUTPUT_GLOBAL"	
 		fi	
@@ -791,8 +874,9 @@ change|set)
 			record_id=$prm2
 			
 			# Fetch record data using direct API call
-			_cf_get_record "$zone_id" "$record_id"
-			[[ $? -ne 0 ]] && _die "Failed to fetch record \`$record_id'"
+			if ! _cf_get_record "$zone_id" "$record_id"; then
+				_die "Failed to fetch record \`$record_id'"
+			fi
 			
 		else
 			# Name-based mode: use findout_record
@@ -836,8 +920,8 @@ change|set)
 			shift
 
 			[ "$setting" = service_mode ] && setting="proxied"
-			[ "$setting" = newtype -o "$setting" = new_type ] && setting="type"
-			[ "$setting" = newname -o "$setting" = new_name ] && setting="name"
+			[[ $setting == newtype || $setting == new_type ]] && setting="type"
+			[[ $setting == newname || $setting == new_name ]] && setting="name"
 			[ "$setting" = newcontent ] && setting="content"
 			
 			# Validate setting is a known DNS record field
@@ -848,12 +932,12 @@ change|set)
 			
 			if [ "$setting" = proxied ]; then
 				value=${value,,}
-				[ "$value" = on -o "$value" = 1 ] && value=true
-				[ "$value" = off -o "$value" = 0 ] && value=false
+				[[ $value == on || $value == 1 ]] && value=true
+				[[ $value == off || $value == 0 ]] && value=false
 			fi
 			[ "$setting" = type ] && value=${value^^}
 
-			if [ "$setting" != content ] && ( expr "$value" : '[0-9]\+$' >/dev/null || expr "$value" : '[0-9]\+\.[0-9]\+$' >/dev/null || [ "$value" = true -o "$value" = false ] )
+			if [ "$setting" != content ] && ( expr "$value" : '[0-9]\+$' >/dev/null || expr "$value" : '[0-9]\+\.[0-9]\+$' >/dev/null || [[ $value == true || $value == false ]] )
 			then
 				value_escq=$value
 			else
@@ -863,12 +947,11 @@ change|set)
 		done
 
 		_loading2 "Updating record $record_name ($record_id)"
-		call_cf_v4 PUT /zones/$zone_id/dns_records/$record_id "{$old_data,$new_data}" -- \
-			%"  ID: %s$NL  Name: %s$NL  Type: %s$NL  Content: %s$NL  TTL: %s$NL  Proxied: %s$NL" ,id,name,type,content,ttl,proxied
-		if [[ $? -eq 0 ]]; then
-			_success "Record updated successfully"
+		if call_cf_v4 PUT /zones/"$zone_id"/dns_records/"$record_id" "{$old_data,$new_data}" -- \
+			%"  ID: %s$NL  Name: %s$NL  Type: %s$NL  Content: %s$NL  TTL: %s$NL  Proxied: %s$NL" ,id,name,type,content,ttl,proxied; then
+			ui_ok "Record updated successfully"
 		else
-			_error "Failed to update record"
+			ui_err "Failed to update record"
 		fi
 		;;
 	*)
@@ -889,7 +972,7 @@ clear)
 		CLI_ZONE="$1"
 		_cf_zone_exists "$CLI_ZONE"
 		ZONE_ID=$(_cf_zone_id "$CLI_ZONE")
-		call_cf_v4 DELETE /zones/$ZONE_ID/purge_cache '{"purge_everything":true}'
+		call_cf_v4 DELETE /zones/"$ZONE_ID"/purge_cache '{"purge_everything":true}'
 		;;
 	*)
 		help clear
@@ -917,7 +1000,7 @@ invalidate)
 					domain=${BASH_REMATCH[re_grps-1]}
 					while true
 					do
-						zone_id=`_cf_zone_id "$domain" 2>/dev/null; echo "$zone_id"`
+						zone_id=$(_cf_zone_id "$domain" 2>/dev/null; echo "$zone_id")
 						if [ -n "$zone_id" ]
 						then
 							break
@@ -936,7 +1019,7 @@ invalidate)
 		then
 			_die "Zone name could not be figured out."
 		fi
-		call_cf_v4 DELETE /zones/$zone_id/purge_cache "{\"files\":[$urls]}"
+		call_cf_v4 DELETE /zones/"$zone_id"/purge_cache "{\"files\":[$urls]}"
 	else
 		_die "Usage: cloudflare invalidate <url-1> [url-2 [url-3 [...]]]"
 	fi
@@ -971,7 +1054,7 @@ template)
 			help template
 			_die "Template file not found - templates/$TEMPLATE_NAME"
 		else
-			_success "Template file found - templates/$TEMPLATE_NAME"
+			ui_ok "Template file found - templates/$TEMPLATE_NAME"
 			TEMPLATE_FILE="templates/$TEMPLATE_NAME"
 		fi
 
@@ -1022,7 +1105,7 @@ template)
 		_loading2 "Checking for required variables"
 		for var in "${REQUIRED_VARIABLES[@]}"; do
 			if [ -z "${ARG_VARIABLES[$var]}" ]; then
-				_error "Error: Required variable '$var' is not defined."
+				ui_err "Error: Required variable '$var' is not defined."
 				exit 1
 			else
 				_loading3 " - Variable defined $var: ${ARG_VARIABLES[$var]}"
@@ -1053,6 +1136,7 @@ template)
 				[[ DEBUG -eq 1 ]] && echo "DEBUG: $line"
 				[[ DEBUG -eq 1 ]] && set -x
 				CMD_RUN=("$0" "$line")
+				# shellcheck disable=SC2294  # the template line is deliberately re-parsed
 				eval "${CMD_RUN[@]}"
 				[[ DEBUG -eq 1 ]] && set +x
 				_loading3 "============= Done"
@@ -1128,7 +1212,7 @@ account)
 		ACCOUNT_ID=$1
 		[ -z "$1" ] && { help accounts; _die "Missing account id"; }
 		_loading "Getting account details for $1"
-		call_cf_v4 GET /accounts/$1
+		call_cf_v4 GET /accounts/"$1"
 		;;
 	zones)
 		_pre_flight_check CF_
@@ -1137,7 +1221,7 @@ account)
 		_loading "Getting zones for account $ACCOUNT_ID"
 		ACCOUNT_ZONE_LIST="Name\tStatus\tType\tID\tName Servers\tOriginal Name Servers\n"
 		ACCOUNT_ZONE_LIST+="----\t------\t----\t--\t------------\t-------------------\n"		
-		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id=$ACCOUNT_ID -- .result %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
+		ACCOUNT_ZONE_LIST+=$(call_cf_v4 GET /zones account.id="$ACCOUNT_ID" -- .result %"%s$TA%s$TA%s$TA%s$TA%s$TA%s$NL" ,name,status,type,id,name_servers,original_name_servers)
 		echo -e "$ACCOUNT_ZONE_LIST" | column -t -s $'\t'
 		;;
 	*)
@@ -1223,19 +1307,15 @@ proxy)
 	fi
 
 	_loading2 "Record: $RECORD_FQDN ($RECORD_TYPE) -> currently proxied=$RECORD_PROXIED"
-	read -r -p "Do you want to $action this record? [y/N] " ANSWER
-	case "$ANSWER" in
-		[yY]|[yY][eE][sS])
-			_loading2 "Updating record to proxied=$target_proxied"
-			UPDATE_BODY='{"proxied":'"$target_proxied"'}'
-			cf_api PATCH /client/v4/zones/${DERIVED_ZONE_ID}/dns_records/${RECORD_ID} "$UPDATE_BODY"
-			NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
-			_success "Record $RECORD_FQDN proxied=$NEW_STATE"
-			;;
-		*)
-			_loading2 "Aborted by user; no changes made."
-			;;
-	esac
+	if ui_confirm "Do you want to $action this record?" n; then
+		_loading2 "Updating record to proxied=$target_proxied"
+		UPDATE_BODY='{"proxied":'"$target_proxied"'}'
+		cf_api PATCH /client/v4/zones/"${DERIVED_ZONE_ID}"/dns_records/"${RECORD_ID}" "$UPDATE_BODY"
+		NEW_STATE=$(echo "$API_OUTPUT" | jq -r '.result.proxied // "unknown"')
+		ui_ok "Record $RECORD_FQDN proxied=$NEW_STATE"
+	else
+		_loading2 "Aborted by user; no changes made."
+	fi
 	;;
 
 # ----------------
@@ -1251,7 +1331,7 @@ check)
 		_cf_zone_exists "$DOMAIN"
 		ZONE_ID=$(_cf_zone_id "$DOMAIN")
 		_loading2 "Found zone id $ZONE_ID for $DOMAIN"
-		call_cf_v4 PUT /zones/$ZONE_ID/activation_check
+		call_cf_v4 PUT /zones/"$ZONE_ID"/activation_check
 		;;
 	*)
 		_die "Parameters:
@@ -1264,10 +1344,10 @@ check)
 # -- json command
 # ---------------
 json)	
-	_loading "Reading STDIN data and sending to jq_decode with args: ${@}"
+	_loading "Reading STDIN data and sending to jq_decode with args: ${*}"
 	JSON_FILE="$1"
 	shift
-	cat $JSON_FILE | jq_decode "${@}"	
+	cat "$JSON_FILE" | jq_decode "${@}"	
 	;;
 # -----------------------------------------------
 # -- ishex command
@@ -1281,7 +1361,7 @@ ishex)
 # -----------------------------------------------
 pass)	
 	_pre_flight_check CF_
-	call_cf_v4 ${*}
+	call_cf_v4 "$@"
 	;;
 # ---------------
 # -- help command

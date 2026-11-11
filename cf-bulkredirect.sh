@@ -7,8 +7,15 @@
 # ===============================================
 # -- Source
 # ===============================================
-# shellcheck source=cloudflare.sh
-source cf-inc.sh
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+# shellcheck source=./cf-inc.sh
+source "$SCRIPT_DIR/cf-inc.sh"
+# _cf_zone_id lives in the API library
+# shellcheck source=./cf-inc-api.sh
+source "$SCRIPT_DIR/cf-inc-api.sh"
+# call_cf_v4 and _check_quiet live in the CF helpers
+# shellcheck source=./cf-inc-cf.sh
+source "$SCRIPT_DIR/cf-inc-cf.sh"
 
 # -- Debug
 CMD_ALL="${*}"
@@ -48,7 +55,7 @@ function _cf_bulkredirect_export() {
 
     # -- Export to CSV
     _loading "Exporting to CSV..."
-    _success "Done!"
+    ui_ok "Done!"
 }
 
 # -- Import
@@ -67,7 +74,7 @@ function _cf_bulkredirect_get_lists() {
     _loading "Getting all lists for account: ${ACCOUNT}"
     OUTPUT="ID\tName\tKind\tItems\n"
     OUTPUT+="--\t----\t----\t-----\n"
-    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists -- .result ,id,name,kind,num_items)
+    OUTPUT+=$(call_cf_v4 GET /accounts/"${ACCOUNT}"/rules/lists -- .result ,id,name,kind,num_items)
     echo -e "$OUTPUT" | column -t
 }
 
@@ -77,7 +84,7 @@ function _cf_bulkredirect_get_list() {
     _loading "Getting list: ${LIST_ID} for account: ${ACCOUNT}"
     #OUTPUT="ID\tName\tKind\tItems\n"
     #OUTPUT+="--\t----\t----\t-----\n"
-    OUTPUT+=$(call_cf_v4 GET /accounts/${ACCOUNT}/rules/lists/${LIST_ID}/items -- .result .redirect ,source_url)
+    OUTPUT+=$(call_cf_v4 GET /accounts/"${ACCOUNT}"/rules/lists/"${LIST_ID}"/items -- .result .redirect ,source_url)
     echo -e "$OUTPUT" | column -t
 }
 
@@ -92,8 +99,6 @@ function _cf_bulkredirect_get_account() {
 # ==============================================================================================
 _check_bash
 _check_quiet
-_check_debug
-_check_cloudflare_credentials
 
 _debug "Checking for options"
 while [ -n "$1" ]
@@ -107,18 +112,22 @@ do
 			TEST=$1;;
 		-D|--debug)
             _loading "Debug mode enabled"
-			DEBUG=1;;
+			DEBUG=1
+			UI_VERBOSE=1;;
 		-DC|--debug-curl)
 			DEBUG=1
+			UI_VERBOSE=1
 			DEBUG_CURL_OUTPUT=2;;
 		-d|--detail|--detailed|--details)
+			# shellcheck disable=SC2034  # accepted for compatibility; the CSV detail mode was never wired up
 			details=1;;
 		-q|--quiet)
-			# TODO needs  to be re-implemmented
-			QUIET=1;;
+			# Human output is suppressed; errors and warnings still print.
+			QUIET=1
+			UI_QUIET=1;;
 		-h|--help)
 			_cf_bulkredirect_help
-			_die
+			exit 0
 			;;
 		--)	shift
 			break;;
@@ -132,6 +141,11 @@ done
 if [ -z "$1" ]; then
 	_cf_bulkredirect_help
 	_die "Missing arguments" 1
+fi
+
+# -- One banner per run; -q (UI_QUIET) suppresses it. stderr only.
+if [[ ${UI_QUIET:-0} != 1 ]]; then
+	ui_header "cf-bulkredirect"
 fi
 
 # -- Debug
@@ -152,7 +166,8 @@ case "$CMD1" in
             _cf_bulkredirect_help
             _die "Missing domain name" 1
         fi
-        _cf_bulkredirect_export ${1}
+        _check_cloudflare_creds
+        _cf_bulkredirect_export "${1}"
         ;;
     add)
         _add
@@ -162,7 +177,8 @@ case "$CMD1" in
             _cf_bulkredirect_help
             _die "Missing account name" 1
         fi
-        _cf_bulkredirect_get_lists ${1}
+        _check_cloudflare_creds
+        _cf_bulkredirect_get_lists "${1}"
         ;;
     get-list)
         if [[ -z "$1" ]]; then
@@ -172,14 +188,16 @@ case "$CMD1" in
             _cf_bulkredirect_help
             _die "Missing list ID" 1
         fi
-        _cf_bulkredirect_get_list ${1} ${2}
+        _check_cloudflare_creds
+        _cf_bulkredirect_get_list "${1}" "${2}"
         ;;
     get-account)
+        _check_cloudflare_creds
         _cf_bulkredirect_get_account
         ;;
     *)
         _cf_bulkredirect_help
         _die "Invalid command! Use 'cf-bulkredirect --help' for more information." 1
-        exit 1
-        ;;
 esac
+
+ui_summary

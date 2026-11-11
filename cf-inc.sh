@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # =============================================================================
 # -- cf-inc.sh - v2.3 - Cloudflare Includes
 # =============================================================================
@@ -8,46 +9,86 @@
 REQUIRED_APPS=("jq" "column")
 
 # ==================================
-# -- Colors
+# -- bash-ui (vendored)
 # ==================================
-NC=$(tput sgr0)
-CRED='\e[0;31m'
-CRED=$(tput setaf 1)
-CYELLOW=$(tput setaf 3)
-CGREEN=$(tput setaf 2)
-CBLUEBG=$(tput setab 4)
-CCYAN=$(tput setaf 6)
-CGRAY=$(tput setaf 7)
-CDARKGRAY=$(tput setaf 8)
+# Human output goes through ui_* on stderr; data stays on stdout, so
+# `cloudflare list zones | jq` keeps working. Set BASH_UI to a checkout's
+# ui.sh to develop against a working copy instead of the vendored file.
+_cf_ui_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)
+_CF_UI_LIB=""
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2) )); then
+	for _cf_ui_candidate in "${BASH_UI:-}" "$_cf_ui_dir/vendor/bash-ui/ui.sh" "$PWD/vendor/bash-ui/ui.sh"; do
+		if [[ -n $_cf_ui_candidate && -r $_cf_ui_candidate ]]; then
+			_CF_UI_LIB=$_cf_ui_candidate
+			break
+		fi
+	done
+fi
+if [[ -n $_CF_UI_LIB ]]; then
+	# shellcheck source=/dev/null
+	source "$_CF_UI_LIB"
+fi
+unset _cf_ui_candidate
+
+# Plain printf stubs keep a partial checkout (or bash 4.0/4.1) working.
+if ! command -v ui_ok >/dev/null 2>&1; then
+	ui_header()  { printf '== %s ==\n' "${1:-}" >&2; }
+	ui_section() { printf '\n== %s ==\n' "${1:-}" >&2; }
+	ui_step()    { printf '> %s\n' "$*" >&2; }
+	ui_ok()      { printf 'OK: %s\n' "$*" >&2; }
+	ui_warn()    { printf 'WARN: %s\n' "$*" >&2; }
+	ui_err()     { printf 'ERR: %s\n' "$*" >&2; }
+	ui_info()    { printf '%s\n' "$*" >&2; }
+	ui_debug()   { [[ ${UI_VERBOSE:-0} == 1 ]] && printf 'DEBUG: %s\n' "$*" >&2; return 0; }
+	ui_die()     { ui_err "${1:-}"; exit "${2:-1}"; }
+	ui_kv()      { printf '  %-14s %s\n' "${1:-}" "${2:-}" >&2; }
+	ui_list()    { printf '  - %s\n' "$@" >&2; }
+	ui_hr()      { printf '%s\n' '----------------------------------------' >&2; }
+	ui_style()   { shift; printf '%s' "$*"; }
+	ui_confirm() { [[ ${UI_YES:-0} == 1 || ${2:-n} == y ]]; }
+	ui_spin() { local _m=${1:-}; shift; if [[ ${1:-} == -- ]]; then shift; fi
+		if "$@" >&2; then ui_ok "$_m"; else local _rc=$?; ui_err "$_m (exit $_rc)"; return "$_rc"; fi; }
+	ui_table()   { cat >&2; }
+	ui_summary() { :; }
+fi
 
 # =============================================================================
 # -- Core Functions
 # =============================================================================
 
 # =====================================
-# -- messages
+# -- messages (deprecated adapters)
+# -- Kept so existing and third-party callers keep working.
+# -- New code calls ui_* directly.
 # =====================================
 
-_error () { [[ $QUIET == "0" ]] && echo -e "${CRED}** ERROR ** - ${*} ${NC}" >&2; } 
-_warning () { [[ $QUIET == "0" ]] && echo -e "${CYELLOW}** WARNING ** - ${*} ${NC}" >&2; }
-_success () { [[ $QUIET == "0" ]] && echo -e "${CGREEN}** SUCCESS ** - ${*} ${NC}"; }
-_running () { [[ $QUIET == "0" ]] && echo -e "${CBLUEBG}${*}${NC}"; }
-_running2 () { [[ $QUIET == "0" ]] && echo -e " * ${CGRAY}${*}${NC}"; }
-_running3 () { [[ $QUIET == "0" ]] && echo -e " ** ${CDARKGRAY}${*}${NC}"; }
-_creating () { [[ $QUIET == "0" ]] && echo -e "${CGRAY}${*}${NC}"; }
-_separator () { [[ $QUIET == "0" ]] && echo -e "${CYELLOWBG}****************${NC}"; }
-_dryrun () { [[ $QUIET == "0" ]] && echo -e "${CCYAN}** DRYRUN: ${*$}${NC}"; }
-_quiet () { [[ $QUIET == "1" ]] && echo -e "${*}"; }
+_error () { ui_err "$@"; }
+_warning () { ui_warn "$@"; }
+_success () { ui_ok "$@"; }
+_running () { ui_step "$@"; }
+_running2 () { ui_step "$@"; }
+_running3 () { ui_step "$@"; }
+_creating () { ui_info "$@"; }
+_separator () { ui_hr; }
+_dryrun () { ui_info "DRYRUN: $*"; }
+_quiet () { [[ ${QUIET:-0} == "1" ]] && printf '%s\n' "$*"; }
+
+_die () {
+	if [ -n "${1:-}" ]; then
+		ui_err "$1"
+	fi
+	exit "${2:-1}"
+}
 
 # Compatibility aliases: some scripts use _loading/_loading2/_loading3.
 if ! declare -F _loading >/dev/null 2>&1; then
-    _loading() { _running "$@"; }
+    _loading() { ui_step "$@"; }
 fi
 if ! declare -F _loading2 >/dev/null 2>&1; then
-    _loading2() { _running2 "$@"; }
+    _loading2() { ui_step "$@"; }
 fi
 if ! declare -F _loading3 >/dev/null 2>&1; then
-    _loading3() { _running3 "$@"; }
+    _loading3() { ui_step "$@"; }
 fi
 
 # =====================================
@@ -67,20 +108,21 @@ function _debug () {
 			DEBUG_MSG_OUTPUT+="CURL_OUTPUT: $CURL_OUTPUT_GLOBAL"
 		fi
 		# -- Check if DEBUG_MSG is an array
+        # shellcheck disable=SC2154  # $arg is intentionally optional
         if [[ "$(declare -p "$arg" 2>/dev/null)" =~ "declare -a" ]]; then
 			DEBUG_MSG_OUTPUT+="Array contents:"
 			for item in "${arg[@]}"; do
                 DEBUG_MSG_OUTPUT+="${item}"
 			done               
-            echo -e "${CCYAN}** DEBUG: ${PREV_CALLER_NAME}: ARRAY: ${DEBUG_MSG_OUTPUT}${NC}" >&2    
+            ui_info "DEBUG: ${PREV_CALLER_NAME}: ARRAY: ${DEBUG_MSG_OUTPUT}"
 		else
-            echo -e "${CCYAN}** DEBUG: ${PREV_CALLER_NAME}: ${DEBUG_MSG}${NC}" >&2
+            ui_info "DEBUG: ${PREV_CALLER_NAME}: ${DEBUG_MSG}"
         fi
 	fi
 
 	if [[ $DEBUG_FILE == "1" ]]; then
 		DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
-		echo -e "${PREV_CALLER_NAME}:${DEBUG_MSG_OUTPUT}" >> "$DEBUG_FILE_PATH"
+		printf '%s:%s\n' "$PREV_CALLER_NAME" "$DEBUG_MSG_OUTPUT" >> "$DEBUG_FILE_PATH"
 	fi
 }
 
@@ -165,7 +207,7 @@ function _check_cloudflare_creds_old () {
                 API_METHOD="token"
                 _debug "Found profile $API_PROFILE: API_TOKEN = $(_mask_sensitive "${API_TOKEN}")"
             else
-                _error "Profile $API_PROFILE not found in $CONFIG"
+                ui_err "Profile $API_PROFILE not found in $CONFIG"
                 exit 1
             fi
         fi
@@ -176,26 +218,26 @@ function _check_cloudflare_creds_old () {
 
 
     if [[ -n $API_TOKEN ]]; then
-        _running "Found \$API_TOKEN via CLI using for authentication/."
+        ui_step "Found \$API_TOKEN via CLI using for authentication/."
         API_TOKEN=$CF_SPC_TOKEN
     elif [[ -n $API_ACCOUNT ]]; then
-        _running "Found \$API_ACCOUNT via CLI using as authentication."
+        ui_step "Found \$API_ACCOUNT via CLI using as authentication."
         if [[ -n $API_APIKEY ]]; then
-            _running "Found \$API_APIKEY via CLI using as authentication."
+            ui_step "Found \$API_APIKEY via CLI using as authentication."
         else
-            _error "Found API Account via CLI, but no API Key found, use -ak...exiting"
+            ui_err "Found API Account via CLI, but no API Key found, use -ak...exiting"
             exit 1
         fi
     elif [[ -f "$CONFIG" ]]; then
         _debug "Found .cloudflare file."
-        # shellcheck source=$HOME/.cloudflare
+        # shellcheck source=/dev/null
         source "$CONFIG"
 
         # Gather all ${PRE_TAG}_ACCOUNT and ${PRE_TAG}_TOKEN variables from the file
         _debug "Gathering all ${PRE_TAG}ACCOUNT and ${PRE_TAG}TOKEN variables from $CONFIG"
-        ACCOUNT_PROFILES=$(cat $CONFIG | grep -E "^${PRE_TAG}(ACCOUNT|TOKEN)_" | awk -F= '{print $1}' | sort -u)
+        ACCOUNT_PROFILES=$(cat "$CONFIG" | grep -E "^${PRE_TAG}(ACCOUNT|TOKEN)_" | awk -F= '{print $1}' | sort -u)
         if [[ -z $ACCOUNT_PROFILES ]]; then
-            _error "No ${PRE_TAG}ACCOUNT or ${PRE_TAG}TOKEN found in \$HOME/.cloudflare"
+            ui_err "No ${PRE_TAG}ACCOUNT or ${PRE_TAG}TOKEN found in \$HOME/.cloudflare"
             exit 1
         fi
 
@@ -210,7 +252,7 @@ function _check_cloudflare_creds_old () {
                     API_APIKEY=$(grep "^${PRE_TAG}KEY=" "$CONFIG" | cut -d= -f2-)
                     _debug "Selected profile: $PROFILE_NAME with API_ACCOUNT = ${API_ACCOUNT} and API_KEY = $(_mask_sensitive "${API_APIKEY}") and API_METHOD = ${API_METHOD} from $CONFIG"
                 else
-                    _error "No ${PRE_TAG}KEY found in $CONFIG, required for ${PRE_TAG}ACCOUNT"
+                    ui_err "No ${PRE_TAG}KEY found in $CONFIG, required for ${PRE_TAG}ACCOUNT"
                     exit 1
                 fi
             elif [[ $ACCOUNT_PROFILES == *"TOKEN"* ]]; then
@@ -219,7 +261,7 @@ function _check_cloudflare_creds_old () {
                 API_METHOD="token"
                 _debug "Selected profile: $PROFILE_NAME with API_APIKEY = $(_mask_sensitive "${API_APIKEY}") and API_METHOD = ${API_METHOD} from $CONFIG"
             else
-                _error "No ${PRE_TAG}ACCOUNT or ${PRE_TAG}TOKEN found in $CONFIG"
+                ui_err "No ${PRE_TAG}ACCOUNT or ${PRE_TAG}TOKEN found in $CONFIG"
                 exit 1
             fi
         else
@@ -228,7 +270,7 @@ function _check_cloudflare_creds_old () {
             select profile in $ACCOUNT_PROFILES; do
                 if [[ -n $profile ]]; then
                 _debug "Selected profile: $profile"
-                PROFILE_NAME=$(echo "$profile" | sed "s/^${PRE_TAG}ACCOUNT_//")
+                PROFILE_NAME=${profile#"${PRE_TAG}ACCOUNT_"}
                     if [[ $profile == *"ACCOUNT"* ]]; then
                         API_ACCOUNT=$(grep "^${profile}=" "$CONFIG" | cut -d= -f2-)
                         API_APIKEY=$(grep "^${PRE_TAG}KEY_${PROFILE_NAME}=" "$CONFIG" | cut -d= -f2-)
@@ -236,7 +278,7 @@ function _check_cloudflare_creds_old () {
                             API_METHOD="account"
                             _debug "Selected ${PROFILE_NAME} = API_ACCOUNT: ${API_ACCOUNT} and API_APIKEY: $(_mask_sensitive "${API_APIKEY}") and API_METHOD: ${API_METHOD} from $CONFIG"
                         else
-                            _error "No ${PRE_TAG}KEY_${PROFILE_NAME} found in $CONFIG, required for ${profile}ACCOUNT"
+                            ui_err "No ${PRE_TAG}KEY_${PROFILE_NAME} found in $CONFIG, required for ${profile}ACCOUNT"
                             exit 1
                         fi
                     elif [[ $profile == *"TOKEN"* ]]; then
@@ -244,12 +286,12 @@ function _check_cloudflare_creds_old () {
                         API_METHOD="token"
                         _debug "Selected ${PROFILE_NAME} = API_TOKEN: $(_mask_sensitive "${API_TOKEN}") and API_METHOD: ${API_METHOD} from $CONFIG"
                     else
-                        _error "No ${profile}ACCOUNT or ${profile}TOKEN found in $CONFIG"
+                        ui_err "No ${profile}ACCOUNT or ${profile}TOKEN found in $CONFIG"
                         exit 1
                     fi
                     break
                 else
-                    _error "Invalid selection, please try again."
+                    ui_err "Invalid selection, please try again."
                 fi
             done
         fi
@@ -257,7 +299,7 @@ function _check_cloudflare_creds_old () {
 
     # -- Final check
     if [[ -z $API_TOKEN && -z $API_ACCOUNT && -z $API_APIKEY ]]; then
-        _error "No Cloudflare credentials found, please set via CLI or in \$HOME/.cloudflare"
+        ui_err "No Cloudflare credentials found, please set via CLI or in \$HOME/.cloudflare"
         exit 1
     fi        
 }
@@ -319,14 +361,14 @@ function _check_cloudflare_creds () {
             fi
         fi
 
-        _error "Profile ${API_PROFILE} not found or incomplete in ${CONFIG}."
-        _error "Check your ~/.cloudflare configuration or omit --profile."
+        ui_err "Profile ${API_PROFILE} not found or incomplete in ${CONFIG}."
+        ui_err "Check your ~/.cloudflare configuration or omit --profile."
         exit 1
     fi
 
     # Check if .cloudflare file exists
     if [[ ! -f "$CONFIG" ]]; then
-        _error "No .cloudflare file found at $CONFIG"
+        ui_err "No .cloudflare file found at $CONFIG"
         exit 1
     fi
     
@@ -392,7 +434,7 @@ function _check_cloudflare_creds () {
     
     # Check if we found any profiles
     if [[ ${#available_profiles[@]} -eq 0 ]]; then
-        _error "No valid Cloudflare credentials found in $CONFIG"
+        ui_err "No valid Cloudflare credentials found in $CONFIG"
         exit 1
     fi
     
@@ -413,7 +455,7 @@ function _check_cloudflare_creds () {
     echo
     
     while true; do
-        read -p "Select a profile (1-${#available_profiles[@]}): " selection
+        read -r -p "Select a profile (1-${#available_profiles[@]}): " selection
         if [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le ${#available_profiles[@]} ]]; then
             local selected_profile="${available_profiles[$((selection-1))]}"
             _debug "User selected profile: $selected_profile"
@@ -432,7 +474,7 @@ function _check_cloudflare_creds () {
 function _cf_list_profiles () {
     local CONFIG="$HOME/.cloudflare"
     if [[ ! -f "$CONFIG" ]]; then
-        _error "No .cloudflare file found at $CONFIG"
+        ui_err "No .cloudflare file found at $CONFIG"
         return 1
     fi
 
@@ -475,11 +517,11 @@ function _cf_show_profile () {
     local NAME="$1"
     local CONFIG="$HOME/.cloudflare"
     if [[ -z "$NAME" ]]; then
-        _error "Usage: cloudflare profile show <name>"
+        ui_err "Usage: cloudflare profile show <name>"
         return 1
     fi
     if [[ ! -f "$CONFIG" ]]; then
-        _error "No .cloudflare file found at $CONFIG"
+        ui_err "No .cloudflare file found at $CONFIG"
         return 1
     fi
 
@@ -520,7 +562,7 @@ function _cf_show_profile () {
         return 0
     fi
 
-    _error "Profile ${NAME} not found or incomplete in ${CONFIG}"
+    ui_err "Profile ${NAME} not found or incomplete in ${CONFIG}"
     return 1
 }
 
@@ -531,7 +573,7 @@ function _cf_show_profile () {
 function _cf_profiles_list () {
     local CONFIG="$HOME/.cloudflare"
     if [[ ! -f "$CONFIG" ]]; then
-        _error "No .cloudflare file found at $CONFIG"
+        ui_err "No .cloudflare file found at $CONFIG"
         return 1
     fi
 
@@ -620,11 +662,11 @@ function _set_credentials_from_profile() {
             export API_TOKEN API_METHOD
             ;;
         *"_INCOMPLETE")
-            _error "Selected profile is incomplete and cannot be used"
+            ui_err "Selected profile is incomplete and cannot be used"
             exit 1
             ;;
         *)
-            _error "Unknown profile type: $profile"
+            ui_err "Unknown profile type: $profile"
             exit 1
             ;;
     esac
@@ -637,8 +679,8 @@ function _set_credentials_from_profile() {
 # =====================================
 function _check_required_apps () {
     for app in "${REQUIRED_APPS[@]}"; do
-        if ! command -v $app &> /dev/null; then
-            _error "$app could not be found, please install it."
+        if ! command -v "$app" &> /dev/null; then
+            ui_err "$app could not be found, please install it."
             exit 1
         fi
     done
@@ -650,9 +692,12 @@ function _check_required_apps () {
 # -- _check_bash - check version of bash
 # ===============================================
 function _check_bash () {
-	# - Check bash version and _die if not at least 4.0
+	# - Require bash 4.0; 4.2+ is required for the vendored bash-ui library.
 	if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
 		_die "Sorry, you need at least bash 4.0 to run this script." 1
+	fi
+	if [[ -z $_CF_UI_LIB ]]; then
+		ui_warn "bash ${BASH_VERSION} detected: bash 4.2+ gives the full bash-ui output."
 	fi
 }
 

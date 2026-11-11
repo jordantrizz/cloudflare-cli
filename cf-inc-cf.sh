@@ -11,7 +11,7 @@ VERSION="$(cat "$SCRIPT_DIR"/VERSION 2>/dev/null || echo "unknown")"
 DEBUG=0
 DEBUG_FILE_PATH="$HOME/cloudflare-cli-debug.log"
 # Clear debug log
-echo "" > $DEBUG_FILE_PATH
+echo "" > "$DEBUG_FILE_PATH"
 QUIET=0
 NL=$'\n'
 TA=$'\t'
@@ -33,7 +33,7 @@ HELP_OPTIONS="Options:
 	--debug, -D            Display API debugging info
 	--debug-curl, -DC      Display API debugging info and curl output
 	--quiet, -q            Less verbose
-	-y, --yes, --force     Skip confirmation prompts (e.g. when an existing record is found)
+	-y, --yes, --force     Skip all prompts (add-record TTL/proxy and the existing-record check)
 	-E <email>             Cloudflare Email
 	-T <api_token>         Cloudflare API Token
 	-p, --profile NAME     Use credentials profile NAME from ~/.cloudflare (or DEFAULT)
@@ -200,6 +200,9 @@ $ cloudflare -z extra.com -f zones.txt clear cache
 # Continue despite errors
 $ cloudflare -f zones.txt --continue-on-error clear cache
 
+# Exit status: 0 only when every zone succeeded, 1 on any failure or cancellation
+$ cloudflare -f zones.txt clear cache; echo \$?
+
 Zone Creation Examples:
 
 # Create one zone (prints assigned nameservers)
@@ -228,6 +231,7 @@ Examples:
 Notes:
 	- The output includes the nameservers you must set at your registrar.
 	- Use --continue-on-error to keep going after failures.
+	- Exit status is 0 only when every zone succeeded, 1 on any failure or cancellation.
 
 ${HELP_VERSION}"
 
@@ -353,6 +357,7 @@ Notes:
 	- Bulk mode uses one zone per line in zones.txt (comments with # allowed).
 	- The output includes the nameservers you must set at your registrar.
 	- Use --continue-on-error to keep going after failures.
+	- Exit status is 0 only when every zone succeeded, 1 on any failure or cancellation.
 
 ${HELP_VERSION}"
 
@@ -398,7 +403,7 @@ ${HELP_VERSION}"
 # -----------------------------------------------
 HELP_ADD_RECORD="${HELP_CMDS_SHORT}
 
-Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxied] [service] [protocol] [weight] [port]
+Usage: cloudflare add record <zone> <type> <name> <content> [<prio>] [<service> <protocol> <weight> <port>]
     <zone>      domain zone to register the record in, see 'show zones' command
     <type>      one of: A, AAAA, CNAME, MX, NS, SRV, TXT (Contain in double quotes \"\"), SPF, LOC
     <name>      subdomain name, or \"@\" to refer to the domain's root
@@ -407,21 +412,25 @@ Usage: cloudflare add record <zone> <type> <name> <content> [ttl] [prio | proxie
                     any text for TXT, spf definition text for SPF
                     coordinates for LOC (see RFC 1876 section 3)
 Options
-	[ttl]       Time To Live, numeric value or auto (1 = auto)
+	--ttl <auto|seconds>   Time To Live: 'auto' (default) or a number of seconds
+	--proxy <yes|no>       Proxy through Cloudflare (also accepts true|false).
+	                       Only for A, AAAA and CNAME records.
     
     = MX records:
     [prio]      required only by MX and SRV records, enter \"10\" if unsure
     
-    = A or CNAME records:
-    [proxied]   Proxied, true or false. For A or CNAME records only.
-    
     = SRV records:
+    [prio]      priority, enter \"10\" if unsure
     [service]   service name, eg. \"sip\"
     [protocol]  tcp, udp, tls
     [weight]    relative weight for records with the same priority
     [port]      layer-4 port number
 
-    -y, --yes, --force   Skip the prompt when an existing record is found.
+    On a terminal a missing --ttl or --proxy is prompted for with auto/yes as the
+    default: press Enter to accept. Without a terminal the defaults are used, and
+    -y/--force skips every prompt.
+
+    -y, --yes, --force   Skip all prompts, including TTL/proxy and the existing-record check.
 
 Note: If a record with the same name and type already exists, you will be prompted
       to confirm before creating a duplicate. Use -y/--force to skip this prompt.
@@ -860,6 +869,7 @@ _jq_pfmt_field() {
 		# Literal string, possibly with PHP $var interpolation
 		local inner="${f:1:-1}"
 		local jq_str
+		# shellcheck disable=SC2001  # capture groups are sed's job
 		jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
 		echo "\"${jq_str}\""
 	elif [[ "$first" == "<" ]]; then
@@ -869,14 +879,14 @@ _jq_pfmt_field() {
 			# String interpolation: <"string with $var"
 			local inner="${code:1:-1}"
 			local jq_str
+			# shellcheck disable=SC2001  # capture groups are sed's job
 			jq_str=$(echo "$inner" | sed 's/\$\([a-zA-Z_][a-zA-Z0-9_]*\)/\\(.\1)/g')
 			echo "\"${jq_str}\""
 		else
 			# PHP expression like $var["key"] -> .var.key
 			local jq_path
-			jq_path=$(echo "$code" | \
-				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\]/.\1.\2/g' | \
-				sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)/.\1/g')
+			# shellcheck disable=SC2016  # sed regexes, not bash expansions
+			jq_path=$(echo "$code" | sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)\["([^"]+)"\]/.\1.\2/g' | sed -E 's/\$([a-zA-Z_][a-zA-Z0-9_]*)/.\1/g')
 			echo "(${jq_path} // \"\")"
 		fi
 	elif [[ -z "$f" ]]; then
@@ -1023,14 +1033,8 @@ jq_decode() {
 }
 
 # -----------------------------------------------
-# -- _die
+# -- _die is defined in cf-inc.sh (message helper)
 # -----------------------------------------------
-function _die () {
-	if [ -n "$1" ];	then
-		_error "$1"
-	fi
-	exit "${2:-1}"
-}
 
 # -----------------------------------------------
 # -- is_hex
@@ -1042,7 +1046,7 @@ is_hex() { expr "$1" : '[0-9a-fA-F]\+$' >/dev/null; }
 # -- Escape json with slashes for curl
 # -----------------------------------------------
 function _escape_string () {
-	echo "$1" | sed 's/"/\\"/g'
+	echo "${1//\"/\\\"}"
 }
 
 function _cf_normalize_record_ttl () {
@@ -1068,6 +1072,71 @@ function _cf_validate_record_priority () {
 	[[ -z "$prio" || "$prio" =~ ^[0-9]+$ ]]
 }
 
+# -----------------------------------------------
+# -- _cf_normalize_proxy <value>
+# -- Accepts yes/no/true/false/on/off/1/0 (case-insensitive) and echoes
+# -- true or false. Returns 1 for anything else.
+# -----------------------------------------------
+function _cf_normalize_proxy () {
+	local value="${1,,}"
+	case "$value" in
+		yes|true|on|1)	echo true;	return 0 ;;
+		no|false|off|0)	echo false;	return 0 ;;
+	esac
+	return 1
+}
+
+# -----------------------------------------------
+# -- _cf_prompt_enabled
+# -- Succeeds when an interactive prompt may be shown: stdin is a terminal
+# -- (or CF_ASSUME_TTY=1, the test hook) and -y/--force or -q did not
+# -- suppress prompts.
+# -----------------------------------------------
+function _cf_prompt_enabled () {
+	[[ "${FORCE_YES:-0}" == "1" ]] && return 1
+	[[ "${QUIET:-0}" == "1" ]] && return 1
+	[[ "${CF_ASSUME_TTY:-0}" == "1" ]] && return 0
+	[[ -t 0 ]]
+}
+
+# -----------------------------------------------
+# -- _cf_prompt_record_ttl [default]
+# -- Echoes the accepted TTL (auto or a number). Empty input or EOF takes the
+# -- default; an invalid answer re-prompts.
+# -----------------------------------------------
+function _cf_prompt_record_ttl () {
+	local default="${1:-auto}" input
+	while :; do
+		printf '%s' "TTL (auto or seconds) [$default]: " >&2
+		read -r input || { echo "$default"; return 0; }
+		input="${input:-$default}"
+		if _cf_normalize_record_ttl "$input" >/dev/null; then
+			echo "$input"
+			return 0
+		fi
+		ui_err "Invalid TTL '$input'. Enter a number of seconds or 'auto'."
+	done
+}
+
+# -----------------------------------------------
+# -- _cf_prompt_record_proxy [default]
+# -- Echoes the accepted answer (yes or no). Empty input or EOF takes the
+# -- default; an invalid answer re-prompts.
+# -----------------------------------------------
+function _cf_prompt_record_proxy () {
+	local default="${1:-yes}" input
+	while :; do
+		printf '%s' "Proxy through Cloudflare? (yes/no) [$default]: " >&2
+		read -r input || { echo "$default"; return 0; }
+		input="${input:-$default}"
+		if _cf_normalize_proxy "$input" >/dev/null; then
+			echo "$input"
+			return 0
+		fi
+		ui_err "Invalid answer '$input'. Enter yes or no."
+	done
+}
+
 # ==============================================================================================
 # -- Check Functions
 # ==============================================================================================
@@ -1076,8 +1145,8 @@ function _cf_validate_record_priority () {
 # -- _check_quiet
 # ===============================================
 function _check_quiet () {
-    if [[ $QUIET == "1" ]]; then
-        echo -e "${CYAN}** DEBUG: Quiet is on${NC}"
+    if [[ ${QUIET:-0} == "1" ]]; then
+        ui_debug "Quiet is on"
     fi
 }
 
@@ -1100,7 +1169,7 @@ function call_cf_v4 () {
 	shift
 
 	local FORMTYPE
-	local QUERY_STRING CURL_OUTPUT PROCESSED_OUTPUT CURL_EXIT_CODE RESULT_PAGE RESULTS_PER_PAGE CURL_OUTPUT_GLOBAL
+	local QUERY_STRING CURL_OUTPUT PROCESSED_OUTPUT CURL_EXIT_CODE RESULT_PAGE RESULTS_PER_PAGE
 	local DEBUG_CURL
 	[[ -n $OVERRIDE_RESULT_PAGE ]] && RESULT_PAGE=$OVERRIDE_RESULT_PAGE || RESULT_PAGE=1
 	[[ -n $OVERRIDE_RESULTS_PER_PAGE ]] && RESULTS_PER_PAGE=$OVERRIDE_RESULTS_PER_PAGE || RESULTS_PER_PAGE=50
@@ -1111,7 +1180,7 @@ function call_cf_v4 () {
 	_debug "func call_cf-v4 variables: METHOD:$METHOD URL_PATH:$URL_PATH Remaing ARGS:${*}"
 
 	# -- Check if PARAMETERS is a JSON string
-	if [ "$METHOD" != POST -o "${1:0:1}" = '{' ]; then
+	if [[ $METHOD != POST || ${1:0:1} == '{' ]]; then
 		_debug "Detected JSON / GET - Setting Content-Type to application/json and FORMTYPE to data"
 		CURL_OPTS+=("-H 'Content-Type: application/json'")
 		FORMTYPE=data
@@ -1135,7 +1204,7 @@ function call_cf_v4 () {
 			_debug "Parameters: ${*}"
 			break
 		else
-			CURL_OPTS+=("--$FORMTYPE '"$1"'")
+			CURL_OPTS+=("--$FORMTYPE '$1'")
 		fi
 		shift
 	done
@@ -1149,7 +1218,7 @@ function call_cf_v4 () {
 	if [[ $TEST == "true" ]]; then
 		_debug "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: [MASKED]\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
 		echo "TEST: curl -sS -H \"X-Auth-Email: $CF_ACCOUNT\" -H \"X-Auth-Key: [MASKED]\" -X $METHOD ${CURL_OPTS[*]} $APIv4_ENDPOINT$URL_PATH"
-		CURL_OUTPUT_GLOBAL='{"success": true,"message": "Operation completed successfully"}'
+
 		return "$CURL_EXIT_CODE"
 	else
 		# -- Go through pages of results
@@ -1166,7 +1235,7 @@ function call_cf_v4 () {
 			elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
 				CURL_CMD="curl -sS \"${APIv4_ENDPOINT}${URL_PATH}${QUERY_STRING}\" -H \"X-Auth-Email: ${API_ACCOUNT}\" -H \"X-Auth-Key: ${API_APIKEY}\" -X \"$METHOD\""
 			else
-				_error "No authentication credentials found"
+				ui_err "No authentication credentials found"
 				return 1
 			fi
 				# Grab each CURL_OPTS and add to CURL_CMD
@@ -1178,22 +1247,22 @@ function call_cf_v4 () {
 			CURL_CMD_MASKED="${CURL_CMD_MASKED//${API_APIKEY}/[MASKED]}"
 			CURL_CMD_MASKED="${CURL_CMD_MASKED//${API_TOKEN}/[MASKED]}"
 			_debug "CURL_CMD: $CURL_CMD_MASKED"
-			CURL_OUTPUT=$(eval $CURL_CMD)		
+			CURL_OUTPUT=$(eval "$CURL_CMD")		
 			CURL_EXIT_CODE=$?
 			_debug "CURL_OUTPUT: $CURL_OUTPUT" 2
 			_debug "CURL_EXIT_CODE: $CURL_EXIT_CODE"
 
 			# -- Check if curl failed
 			if [[ $CURL_EXIT_CODE -gt 0 ]]; then				
-				_error "curl failed - OUTPUT: $CURL_OUTPUT EXITCODE: $CURL_EXIT_CODE"
+				ui_err "curl failed - OUTPUT: $CURL_OUTPUT EXITCODE: $CURL_EXIT_CODE"
 				echo "$CURL_OUTPUT"				
 				exit 1
 			fi
 
 			# -- Check if Cloudflare returned an error
-			if [[ $(grep '^{"success":false' <<<"$CURL_OUTPUT") ]]; then
-				_error "Cloudflare returned an error"
-				_error "$CURL_OUTPUT"
+			if grep -q '^{"success":false' <<<"$CURL_OUTPUT"; then
+				ui_err "Cloudflare returned an error"
+				ui_err "$CURL_OUTPUT"
 				return 1
 			fi
 
@@ -1205,7 +1274,7 @@ function call_cf_v4 () {
 				return 1
 			fi
 			_debug "PROCESSED_OUTPUT: $PROCESSED_OUTPUT"
-            _debug "\$@ == $@"
+            _debug "\$@ == $*"
 			sed -e '/^!/d' <<<"$PROCESSED_OUTPUT"
 
 			if grep -qE '^!has_more' <<<"$PROCESSED_OUTPUT"; then				
@@ -1216,7 +1285,7 @@ function call_cf_v4 () {
 				break
 			fi
 		done
-		CURL_OUTPUT_GLOBAL="$PROCESSED_OUTPUT"
+
 		return $CURL_EXIT_CODE
 	fi
 }
@@ -1239,7 +1308,7 @@ function _cf_zone_create_v4 () {
 	local ZONE_ID
 	local NAME_SERVERS
 
-	[[ -z "$DOMAIN" ]] && _error "Missing zone name" && return 1
+	[[ -z "$DOMAIN" ]] && ui_err "Missing zone name" && return 1
 
 	if [[ -n "$ACCOUNT_ID" ]]; then
 		JSON="{\"account\":{\"id\":\"$ACCOUNT_ID\"},\"name\":\"$DOMAIN\",\"jump_start\":true}"
@@ -1303,7 +1372,7 @@ findout_record() {
 	rec_found=0
 	oldIFS=$IFS
 	IFS=$NL
-	for test_record in $(call_cf_v4 GET /zones/${zone_id}/dns_records -- .result ,name,type,id,ttl,content); do
+	for test_record in $(call_cf_v4 GET /zones/"${zone_id}"/dns_records -- .result ,name,type,id,ttl,content); do
 		IFS=$oldIFS
 		# shellcheck disable=SC2086
 		set -- $test_record
@@ -1320,14 +1389,17 @@ findout_record() {
 			shift
 			test_record_content=$*
 
-			if [ \( -z "$record_type" -o "$test_record_type" = "$record_type" \) -a \( -z "$record_oldcontent" -o "$test_record_content" = "$record_oldcontent" \) ]
-			then				
+			if [[ -z $record_type || $test_record_type == "$record_type" ]] &&
+				[[ -z $record_oldcontent || $test_record_content == "$record_oldcontent" ]]
+			then
 				(( rec_found++ )) || true
 				[ $rec_found -gt 1 ] && { echo >&2; return 4; }
 
 				record_type=$test_record_type
 				record_id=$test_record_id
+				# shellcheck disable=SC2034  # read by cloudflare after this returns
 				record_ttl=$test_record_ttl
+				# shellcheck disable=SC2034  # read by cloudflare after this returns
 				record_content=$test_record_content
 				if [ "$first_match" = 1 ]
 				then
@@ -1358,7 +1430,7 @@ function _cf_check_record_exists () {
 	local RECORD_NAME="$2"
 	local RECORD_TYPE="$3"
 
-	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { _error "_cf_check_record_exists: missing arguments"; return 1; }
+	[[ -z "$ZONE_ID" || -z "$RECORD_NAME" || -z "$RECORD_TYPE" ]] && { ui_err "_cf_check_record_exists: missing arguments"; return 1; }
 
 	_debug "Checking for existing ${RECORD_TYPE} record named ${RECORD_NAME} in zone ${ZONE_ID}"
 	cf_api GET "/client/v4/zones/${ZONE_ID}/dns_records?name=${RECORD_NAME}&type=${RECORD_TYPE}"
@@ -1376,7 +1448,7 @@ function _cf_check_record_exists () {
 		return 1
 	fi
 
-	_warning "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
+	ui_warn "Found ${MATCH_COUNT} existing ${RECORD_TYPE} record(s) for ${RECORD_NAME}:"
 	printf "%-6s %-45s %-45s %-8s %-8s %-36s\n" "Type" "Name" "Content" "TTL" "Proxied" "Record ID"
 	printf "%s\n" "$(printf '%0.s-' {1..155})"
 	echo "$API_OUTPUT" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(.ttl)\t\(.proxied)\t\(.id)"' | while IFS=$'\t' read -r TYPE NAME CONTENT TTL PROXIED RID; do
@@ -1410,7 +1482,7 @@ function zone_search () {
 	elif [[ -n $API_ACCOUNT && -n $API_APIKEY ]]; then
 		CURL_OUTPUT=$(curl -sS "${APIv4_ENDPOINT}/zones${QUERY_STRING}" -H "X-Auth-Email: ${API_ACCOUNT}" -H "X-Auth-Key: ${API_APIKEY}" -X GET)
 	else
-		_error "No authentication credentials found"
+		ui_err "No authentication credentials found"
 		return 1
 	fi
 	
@@ -1447,11 +1519,11 @@ function zone_search () {
 	_debug "Zones found count: $found_count"
 	
 	if [[ $SUCCESS == "1" ]]; then
-		_success "Found the following zones:"
+		ui_ok "Found the following zones:"
 		printf "%-40s | %-40s\n" "DomainID" "Domain"
 		printf "%s-+-%s\n" "$(printf '%0.s-' {1..40})" "$(printf '%0.s-' {1..40})"
 		paste <(echo -e "$ZONE_IDS_FOUND") <(echo -e "$ZONES_FOUND") | column -t -s $'\t' | awk '{printf "%-40s | %-40s\n", $1, $2}'
 	else
-		_error "Zone not found - $QUERY"
+		ui_err "Zone not found - $QUERY"
 	fi
 }

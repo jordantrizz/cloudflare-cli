@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+
+      - name: Syntax check
+        run: |
+          for f in cloudflare cf-tenant cfddnsupdate cf-bulkredirect.sh \
+                   cf-domain-search.sh cf-inc.sh cf-inc-api.sh cf-inc-cf.sh tests/*.sh; do
+            bash -n "$f"
+          done
+
+      - name: ShellCheck
+        run: |
+          files="cloudflare cf-tenant cfddnsupdate cf-bulkredirect.sh
+                 cf-domain-search.sh cf-inc.sh cf-inc-api.sh cf-inc-cf.sh"
+          # shellcheck disable=SC2086  # the file list is split on purpose
+          shellcheck -x $files tests/*.sh
+
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checksum matches the vendored library
+        run: cd vendor/bash-ui && sha256sum -c ui.sh.sha256
+
+      - name: Vendored version is the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned=$(sed -n 's/^UI_VERSION="\(.*\)"$/\1/p' vendor/bash-ui/ui.sh)
+          latest=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/jordantrizz/bash-ui/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          if [ -z "$latest" ]; then
+            echo "could not read the latest bash-ui release"
+            exit 1
+          fi
+          if [ "$pinned" != "$latest" ]; then
+            echo "vendor/bash-ui is $pinned, latest is $latest - run the updater"
+            exit 1
+          fi
+
+      - name: Inlined copy in cfddnsupdate is current
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/jordantrizz/bash-ui/v0.2.0/scripts/bash-ui.sh \
+            | bash -s -- inline --check cfddnsupdate
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq shellcheck
+
+      - name: Run the test suites
+        run: |
+          for suite in tests/test-*.sh; do
+            echo "::group::$suite"
+            bash "$suite"
+            echo "::endgroup::"
+          done
